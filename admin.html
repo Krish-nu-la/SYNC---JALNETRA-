@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JalNetra — Zone administration</title>
+<meta name="description" content="Zone configuration and model status for the JalNetra flood nowcast.">
+<link rel="stylesheet" href="vendor/fonts.css">
+<link rel="stylesheet" href="vendor/tokens.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--ink); color: var(--text);
+               font-family: var(--ff-ui); font-size: 14px; -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer;
+           transition: transform 140ms var(--ease-out); }
+  button:active { transform: scale(0.97); }
+
+  .top {
+    display: flex; align-items: center; gap: 20px; padding: 0 22px; height: 68px;
+    border-bottom: 1px solid var(--hairline); position: sticky; top: 0; background: var(--ink); z-index: 10;
+  }
+  .wordmark { font-family: var(--ff-display); font-weight: 900; font-size: 24px;
+              letter-spacing: -0.02em; margin: 0; }
+  .wordmark span { color: var(--safe); }
+  .crumb { font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted);
+           border-left: 1px solid var(--hairline); padding-left: 18px; font-weight: 700; }
+  .topnav { display: flex; gap: 8px; margin-left: auto; }
+  .topnav a {
+    padding: 9px 15px; border: 1px solid var(--hairline-2); border-radius: 2px;
+    color: var(--muted); text-decoration: none;
+    font-family: var(--ff-display); font-size: 11px; letter-spacing: .1em;
+    text-transform: uppercase; font-weight: 700; white-space: nowrap;
+    transition: color .16s var(--ease-out), background .16s var(--ease-out), border-color .16s var(--ease-out);
+  }
+  .topnav a:hover { color: var(--text); background: var(--surface-2); border-color: var(--muted); }
+
+  main { display: grid; grid-template-columns: 1fr 330px; gap: 18px; padding: 18px 22px 40px; align-items: start; }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--surface); border: 1px solid var(--hairline); }
+  .panel > h2 {
+    font-family: var(--ff-display); font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--muted); font-weight: 700; margin: 0; padding: 15px 17px 13px;
+    border-bottom: 1px solid var(--hairline);
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  .panel > h2 .count { color: var(--text); font-family: var(--ff-mono); }
+
+  /* ---- zone table ---- */
+  .tbl { width: 100%; border-collapse: collapse; }
+  .tbl th {
+    text-align: left; font-size: 9px; letter-spacing: .13em; text-transform: uppercase;
+    color: var(--muted); font-weight: 700; padding: 11px 10px;
+    border-bottom: 1px solid var(--hairline-2); background: var(--surface);
+  }
+  .tbl td { padding: 7px 10px; border-bottom: 1px solid var(--hairline); vertical-align: middle; }
+  .tbl tr:hover td { background: var(--surface-2); }
+  .tbl input[type="text"], .tbl input[type="number"] {
+    width: 100%; background: transparent; border: 1px solid transparent; border-radius: 2px;
+    color: var(--text); font: inherit; font-size: 13px; padding: 5px 6px;
+    transition: border-color .16s var(--ease-out), background .16s var(--ease-out);
+  }
+  .tbl input:hover { border-color: var(--hairline); }
+  .tbl input:focus { border-color: var(--hairline-2); background: var(--ink); outline-offset: 0; }
+  .tbl input.ml { font-family: 'Noto Sans Malayalam', var(--ff-ui); }
+  .tbl .num-in { font-family: var(--ff-mono); font-variant-numeric: tabular-nums; text-align: right; }
+  .col-narrow { width: 92px; }
+  .col-susc { width: 168px; }
+  .col-act { width: 40px; }
+
+  /* susceptibility gets a slider AND a number — it is the value most likely
+     to be tuned by feel, and the least meaningful as a bare digit. */
+  .susc-cell { display: flex; align-items: center; gap: 8px; }
+  .susc-cell input[type="range"] { flex: 1; min-width: 0; height: 18px; }
+  input[type="range"] { -webkit-appearance: none; appearance: none; background: transparent; margin: 0; cursor: pointer; }
+  input[type="range"]::-webkit-slider-runnable-track { height: 3px; background: var(--hairline-2); border-radius: 2px; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px;
+    margin-top: -5px; border-radius: 50%; background: var(--safe); border: 3px solid var(--ink); }
+  input[type="range"]::-moz-range-track { height: 3px; background: var(--hairline-2); border-radius: 2px; }
+  input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%;
+    background: var(--safe); border: 3px solid var(--ink); }
+  .susc-val { font-family: var(--ff-mono); font-size: 12px; width: 34px; text-align: right; }
+
+  .chip-canal {
+    display: inline-block; padding: 3px 7px; border-radius: 2px; font-size: 9px;
+    letter-spacing: .09em; text-transform: uppercase; font-weight: 700;
+    border: 1px solid var(--canal); color: var(--canal);
+  }
+  .chip-canal[data-on="false"] { border-color: var(--hairline); color: var(--muted); opacity: .5; }
+
+  .row-del { color: var(--muted); font-size: 15px; line-height: 1; padding: 4px 7px; border-radius: 2px; }
+  .row-del:hover { color: var(--warning); background: rgba(255,46,77,.1); }
+
+  .tbl-actions { display: flex; gap: 8px; padding: 14px 17px; border-top: 1px solid var(--hairline); flex-wrap: wrap; }
+  .btn {
+    padding: 9px 14px; border: 1px solid var(--hairline-2); border-radius: 2px;
+    font-family: var(--ff-display); font-size: 11px; letter-spacing: .1em;
+    text-transform: uppercase; font-weight: 700; color: var(--text);
+    transition: background .16s var(--ease-out), border-color .16s var(--ease-out);
+  }
+  .btn:hover { background: var(--surface-2); border-color: var(--muted); }
+  .btn-primary { background: var(--safe); color: var(--ink); border-color: var(--safe); }
+  .btn-primary:hover { filter: brightness(1.12); background: var(--safe); }
+  .btn-ghost { border-color: var(--hairline); color: var(--muted); }
+
+  /* ---- status side ---- */
+  .stat-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+              padding: 11px 17px; border-bottom: 1px solid var(--hairline); }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-k { font-size: 11px; color: var(--muted); }
+  .stat-v { font-family: var(--ff-mono); font-size: 12px; text-align: right; }
+
+  .health { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; }
+  .health::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .health-ok { color: var(--safe); }
+  .health-mock { color: var(--watch); }
+  .health-off { color: var(--muted); }
+
+  .src-note { padding: 13px 17px; font-size: 11px; line-height: 1.6; color: var(--muted); }
+  .src-note strong { color: var(--text); }
+
+  .log { max-height: 260px; overflow-y: auto; }
+  .log-row { padding: 9px 17px; border-bottom: 1px solid var(--hairline); font-size: 11px; line-height: 1.5; }
+  .log-row:last-child { border-bottom: none; }
+  .log-t { font-family: var(--ff-mono); color: var(--muted); font-size: 10px; }
+  .log-empty { padding: 17px; font-size: 11px; color: var(--muted); line-height: 1.6; }
+
+  .banner {
+    margin: 0 22px; padding: 12px 15px; border: 1px solid var(--watch); border-radius: 2px;
+    font-size: 11px; line-height: 1.6; color: var(--muted);
+  }
+  .banner strong { color: var(--watch); display: block; font-size: 9px; letter-spacing: .14em;
+                   text-transform: uppercase; margin-bottom: 5px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    background: var(--safe); color: var(--ink); padding: 11px 18px; border-radius: 2px;
+    font-family: var(--ff-display); font-size: 11px; font-weight: 800; letter-spacing: .08em;
+    text-transform: uppercase; z-index: 50;
+    transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+  }
+  .toast[hidden] { display: none; }
+  .toast[data-enter="true"] { opacity: 0; transform: translateX(-50%) translateY(8px); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+</style>
+</head>
+
+<body>
+
+<header class="top">
+  <h1 class="wordmark">JAL<span>NETRA</span></h1>
+  <span class="crumb">Zone administration</span>
+  <nav class="topnav" aria-label="Admin navigation">
+    <a href="index.html">← Back to console</a>
+    <a href="login.html">Sign out</a>
+  </nav>
+</header>
+
+<p class="banner">
+  <strong>Configuration surface</strong>
+  This screen edits the model's inputs. The dispatcher console deliberately does
+  not — live operations and configuration are separate jobs, and a dispatcher
+  mid-event should not be able to change a susceptibility value by accident.
+  Edits here are saved to this browser only; there is no server.
+</p>
+
+<main>
+  <section class="panel">
+    <h2>Zones <span class="count" id="zone-count">0</span></h2>
+    <div style="overflow-x:auto">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Malayalam</th>
+            <th class="col-narrow">Lat</th>
+            <th class="col-narrow">Lng</th>
+            <th class="col-susc">Susceptibility</th>
+            <th class="col-narrow">Pop. est.</th>
+            <th>TP Canal</th>
+            <th class="col-act"></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="tbl-actions">
+      <button class="btn btn-primary" id="add">+ Add zone</button>
+      <button class="btn" id="save">Save to this browser</button>
+      <button class="btn btn-ghost" id="reset">Reset to defaults</button>
+      <button class="btn btn-ghost" id="export">Export JSON</button>
+    </div>
+  </section>
+
+  <div style="display:flex; flex-direction:column; gap:18px">
+    <section class="panel">
+      <h2>Model status</h2>
+      <div class="stat-row"><span class="stat-k">Data source</span>
+        <span class="stat-v"><span class="health health-mock" id="src">Deterministic mock</span></span></div>
+      <div class="stat-row"><span class="stat-k">Contract</span>
+        <span class="stat-v">getFloodRisk()</span></div>
+      <div class="stat-row"><span class="stat-k">Backend endpoint</span>
+        <span class="stat-v"><span class="health health-off">Not connected</span></span></div>
+      <div class="stat-row"><span class="stat-k">Tide input</span>
+        <span class="stat-v"><span class="health health-off">Open question</span></span></div>
+      <div class="stat-row"><span class="stat-k">Zones configured</span>
+        <span class="stat-v num" id="stat-zones">—</span></div>
+      <div class="stat-row"><span class="stat-k">Last call</span>
+        <span class="stat-v" id="stat-last">never</span></div>
+      <div class="stat-row"><span class="stat-k">Last call args</span>
+        <span class="stat-v" id="stat-args">—</span></div>
+      <div class="stat-row"><span class="stat-k">Round trip</span>
+        <span class="stat-v" id="stat-ms">—</span></div>
+      <p class="src-note">
+        Every figure the console displays today comes from a deterministic
+        simulation running in the page. <strong>There is no live rainfall feed and
+        no trained model behind it.</strong> Swapping in the real backend replaces
+        one function body; see <strong>BACKEND_HANDOFF.md</strong>.
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>Recent getFloodRisk() calls</h2>
+      <div class="log" id="log"><p class="log-empty">No calls recorded in this browser yet.
+        Open the console, move the rainfall slider or the scrubber, then come back.</p></div>
+    </section>
+  </div>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+/* ==================================================================
+   Admin surface. Reads and writes the SAME localStorage keys the console
+   reads, so edits here change what the console models. No server.
+   ================================================================== */
+const LS_ZONES = 'jalnetra.zones.v1';
+const LS_LOG   = 'jalnetra.calllog.v1';
+
+const DEFAULT_ZONES = [
+  { id:'kalamassery',  name:'Kalamassery',      ml:'കളമശ്ശേരി',      lat:10.054, lng:76.320, baseSusceptibility:0.82, population:41000, onCanal:false },
+  { id:'edappally',    name:'Edappally',        ml:'ഇടപ്പള്ളി',       lat:10.025, lng:76.308, baseSusceptibility:0.88, population:36500, onCanal:false },
+  { id:'palarivattom', name:'Palarivattom',     ml:'പാലാരിവട്ടം',     lat:10.007, lng:76.305, baseSusceptibility:0.70, population:24800, onCanal:false },
+  { id:'kaloor',       name:'Kaloor',           ml:'കലൂർ',           lat: 9.997, lng:76.299, baseSusceptibility:0.95, population:18400, onCanal:true  },
+  { id:'vennala',      name:'Vennala',          ml:'വെണ്ണല',         lat: 9.998, lng:76.323, baseSusceptibility:0.22, population:21200, onCanal:false },
+  { id:'kacheripady',  name:'Kacheripady',      ml:'കച്ചേരിപ്പടി',    lat: 9.985, lng:76.283, baseSusceptibility:0.48, population:14900, onCanal:false },
+  { id:'marinedrive',  name:'Marine Drive',     ml:'മറൈൻ ഡ്രൈവ്',   lat: 9.982, lng:76.276, baseSusceptibility:0.33, population: 9700, onCanal:false },
+  { id:'cbd_mgroad',   name:'CBD / MG Road',    ml:'എം.ജി. റോഡ്',    lat: 9.978, lng:76.283, baseSusceptibility:0.63, population:16300, onCanal:false },
+  { id:'elamkulam',    name:'Elamkulam',        ml:'ഇളംകുളം',        lat: 9.973, lng:76.301, baseSusceptibility:0.44, population:15600, onCanal:true  },
+  { id:'kadavanthra',  name:'Kadavanthra',      ml:'കടവന്ത്ര',        lat: 9.970, lng:76.298, baseSusceptibility:0.57, population:17800, onCanal:true  },
+  { id:'vyttila',      name:'Vyttila',          ml:'വൈറ്റില',        lat: 9.967, lng:76.318, baseSusceptibility:0.74, population:28400, onCanal:false },
+  { id:'panampilly',   name:'Panampilly Nagar', ml:'പനമ്പിള്ളി നഗർ',  lat: 9.965, lng:76.295, baseSusceptibility:0.52, population:13100, onCanal:true  },
+  { id:'thevara',      name:'Thevara',          ml:'തേവര',           lat: 9.942, lng:76.292, baseSusceptibility:0.38, population:19600, onCanal:true  }
+];
+
+let zones = load();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(LS_ZONES);
+    if (raw) { const z = JSON.parse(raw); if (Array.isArray(z) && z.length) return z; }
+  } catch (e) { console.warn('[admin] stored zones unreadable, using defaults', e); }
+  return JSON.parse(JSON.stringify(DEFAULT_ZONES));
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.hidden = false; t.dataset.enter = 'true';
+  requestAnimationFrame(() => { t.dataset.enter = 'false'; });
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { t.dataset.enter = 'true';
+    setTimeout(() => { t.hidden = true; }, 220); }, 2200);
+}
+
+function slug(name) {
+  return (name || 'zone').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'zone';
+}
+
+function render() {
+  const tb = document.getElementById('rows');
+  tb.innerHTML = '';
+  zones.forEach((z, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" data-f="name" value="${z.name}" aria-label="Zone name"></td>
+      <td><input type="text" class="ml" data-f="ml" value="${z.ml || ''}" lang="ml" aria-label="Malayalam name"></td>
+      <td><input type="number" step="0.001" class="num-in" data-f="lat" value="${z.lat}" aria-label="Latitude"></td>
+      <td><input type="number" step="0.001" class="num-in" data-f="lng" value="${z.lng}" aria-label="Longitude"></td>
+      <td>
+        <div class="susc-cell">
+          <input type="range" min="0" max="1" step="0.01" data-f="baseSusceptibility"
+                 value="${z.baseSusceptibility}" aria-label="Susceptibility for ${z.name}">
+          <span class="susc-val">${Number(z.baseSusceptibility).toFixed(2)}</span>
+        </div>
+      </td>
+      <td><input type="number" step="100" class="num-in" data-f="population" value="${z.population}" aria-label="Population estimate"></td>
+      <td><button class="chip-canal" data-f="onCanal" data-on="${!!z.onCanal}"
+                  aria-pressed="${!!z.onCanal}">${z.onCanal ? 'on canal' : 'off'}</button></td>
+      <td><button class="row-del" aria-label="Remove ${z.name}">×</button></td>`;
+
+    tr.querySelectorAll('[data-f]').forEach(el => {
+      const f = el.dataset.f;
+      if (f === 'onCanal') {
+        el.addEventListener('click', () => {
+          zones[i].onCanal = !zones[i].onCanal;
+          render();
+        });
+      } else if (el.type === 'range') {
+        el.addEventListener('input', () => {
+          zones[i].baseSusceptibility = Number(el.value);
+          el.parentElement.querySelector('.susc-val').textContent = Number(el.value).toFixed(2);
+        });
+      } else {
+        el.addEventListener('input', () => {
+          const v = el.type === 'number' ? Number(el.value) : el.value;
+          zones[i][f] = v;
+          if (f === 'name') zones[i].id = slug(el.value);
+        });
+      }
+    });
+    tr.querySelector('.row-del').addEventListener('click', () => {
+      zones.splice(i, 1); render(); toast('Zone removed — not yet saved');
+    });
+    tb.appendChild(tr);
+  });
+
+  document.getElementById('zone-count').textContent = zones.length;
+  document.getElementById('stat-zones').textContent = zones.length;
+}
+
+document.getElementById('add').addEventListener('click', () => {
+  zones.push({ id:'new_zone_' + (zones.length + 1), name:'New zone', ml:'', lat:9.98, lng:76.29,
+               baseSusceptibility:0.5, population:10000, onCanal:false });
+  render();
+  document.querySelector('#rows tr:last-child input').focus();
+});
+
+document.getElementById('save').addEventListener('click', () => {
+  try {
+    localStorage.setItem(LS_ZONES, JSON.stringify(zones));
+    toast('Saved — reload the console to apply');
+  } catch (e) { toast('Could not save: storage blocked'); }
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  zones = JSON.parse(JSON.stringify(DEFAULT_ZONES));
+  localStorage.removeItem(LS_ZONES);
+  render(); toast('Reset to defaults');
+});
+
+document.getElementById('export').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(zones, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'jalnetra-zones.json'; a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Exported jalnetra-zones.json');
+});
+
+/* ---- call log, written by the console ---- */
+function renderLog() {
+  let log = [];
+  try { log = JSON.parse(localStorage.getItem(LS_LOG) || '[]'); } catch (e) {}
+  const el = document.getElementById('log');
+  if (!log.length) return;
+
+  el.innerHTML = log.slice(0, 40).map(r => `
+    <div class="log-row">
+      <span class="log-t">${new Date(r.at).toLocaleTimeString('en-IN', { hour12:false })}</span>
+      &nbsp; getFloodRisk(<strong>${r.rain}</strong> mm/hr, <strong>+${r.off}</strong> min)
+      → ${r.zones} zones · ${r.ms} ms
+    </div>`).join('');
+
+  const last = log[0];
+  document.getElementById('stat-last').textContent =
+    new Date(last.at).toLocaleTimeString('en-IN', { hour12:false });
+  document.getElementById('stat-args').textContent = `${last.rain} mm/hr, +${last.off} min`;
+  document.getElementById('stat-ms').textContent = last.ms + ' ms';
+}
+
+render();
+renderLog();
+</script>
+</body>
+</html>

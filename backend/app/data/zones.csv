@@ -1,0 +1,13 @@
+id,name,lat,lng,elevation,population,susceptibility,drain_capacity,terrain_factor,canal_distance_km,land_cover,soil_type
+kaloor,Kaloor,9.9982,76.2913,2.8,21000,0.88,18,0.92,0.40,Urban,Clay
+edappally,Edappally,10.0261,76.3084,4.2,35000,0.72,24,0.74,1.20,Urban,Clay
+palarivattom,Palarivattom,10.0098,76.3065,3.5,26000,0.79,20,0.81,0.80,Urban,Clay
+vyttila,Vyttila,9.9671,76.3183,2.4,39000,0.91,16,0.94,0.35,Urban,Clay
+kadavanthra,Kadavanthra,9.9664,76.3040,2.7,23000,0.86,17,0.90,0.45,Urban,Clay
+thevara,Thevara,9.9522,76.2898,1.9,18000,0.93,15,0.97,0.25,Urban,Clay
+panampilly,Panampilly Nagar,9.9650,76.2951,2.5,16000,0.84,18,0.89,0.55,Urban,Clay
+marine_drive,Marine Drive,9.9823,76.2776,1.6,17000,0.95,14,0.98,0.20,Water Body,Sandy
+mgroad,MG Road,9.9816,76.2850,2.2,25000,0.82,19,0.87,0.60,Urban,Clay
+perandoor,Perandoor,10.0148,76.3088,2.9,20000,0.90,16,0.92,0.30,Agricultural,Clay
+fortkochi,Fort Kochi,9.9654,76.2425,1.4,14000,0.97,12,0.99,0.15,Water Body,Sandy
+aluva,Aluva,10.1069,76.3548,8.5,32000,0.55,28,0.48,4.50,Forest,Loam

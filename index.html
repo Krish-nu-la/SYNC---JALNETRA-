@@ -1,0 +1,2416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JalNetra — Kochi Flood Nowcast</title>
+<meta name="description" content="Street-level flood nowcasting for Kochi, Kerala. Simulated forecast built for SYNC 2026.">
+
+<!-- Everything is vendored. PRODUCT.md chose the single-file no-build stack for
+     STAGE RELIABILITY; a CDN in the critical path contradicts that, so there is
+     no network dependency at runtime. -->
+<link rel="stylesheet" href="vendor/tokens.css">
+<link rel="stylesheet" href="vendor/fonts.css">
+<link rel="stylesheet" href="vendor/leaflet.css">
+
+<style>
+  /* ============================================================
+     TOKENS — DIRECTION.md §2.1, amended by the accepted intensity
+     pass. Same hues, pushed chroma. No new colors introduced.
+     ============================================================ */
+  :root {
+    --ink:        #080D14;
+    --surface:    #101A24;
+    --surface-2:  #16232F;
+    --hairline:   #22323F;
+    --hairline-2: #2E4252;
+
+    --safe:       #17E0CC;
+    --watch:      #FFC93C;
+    --alert:      #FF7A1A;
+    --warning:    #FF2E4D;
+
+    --text:       #EAF2F8;
+    --muted:      #93A5B3;
+    --human:      #B26BFF;
+
+    --canal:      #2E8CA6;
+
+    --ff-display: 'Archivo', system-ui, sans-serif;
+    --ff-ui:      'IBM Plex Sans', 'Noto Sans Malayalam', system-ui, sans-serif;
+    --ff-mono:    'IBM Plex Mono', ui-monospace, monospace;
+
+    /* Deliberately unequal. An even grid is what made this read generic. */
+    --rail-l: 244px;
+    --rail-r: 356px;
+    --gap: 16px;
+    --strip-h: 76px;
+
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --panel-shadow: 0 18px 44px rgba(0,0,0,.62);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html, body {
+    height: 100%; margin: 0;
+    background: var(--ink);
+    color: var(--text);
+    font-family: var(--ff-ui);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  .num { font-family: var(--ff-mono); font-variant-numeric: tabular-nums; }
+
+  :focus-visible { outline: 2px solid var(--human); outline-offset: 2px; border-radius: 2px; }
+  button {
+    font: inherit; color: inherit; background: none; border: none; cursor: pointer;
+    transition: transform 140ms var(--ease-out);
+  }
+  /* Pressable things confirm the press. */
+  button:active { transform: scale(0.97); }
+
+  /* ============================================================
+     LAYOUT — implements the Figma frame "JalNetra Console Clean"
+     (1440x900). Measured from the file:
+       hero      1:5   812 x 135   at 16,16
+       citizen   1:9   472 x 95    at 16,165
+       map       1:13  1000 x 280  at 16,255
+       scrubber  1:15  1000 x 60   at 16,840
+       rail      1:17  320 x 900   at 1100,0
+     Two deviations, both to make the design operable:
+       - the design contains no rainfall control anywhere, so the scenario
+         could never change; it goes in the ~528px slot the design leaves
+         beside the 472px citizen card, which is why that card is narrower
+         than the 812px hero.
+       - the design leaves 305px empty between the map bottom (535) and the
+         scrubber (840). The map fills it.
+     ============================================================ */
+  .hud {
+    position: fixed; inset: 0;
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr) 320px;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 16px;
+    padding: 0 16px 16px;
+    max-width: 1440px; margin: 0 auto;
+    pointer-events: none;
+  }
+  .hud > * { pointer-events: auto; }
+
+  /* The base .wordmark rule was lost in the layout restructure, leaving only a
+     media-query override — which is why NETRA had stopped being cyan. */
+  .wordmark {
+    font-family: var(--ff-display); font-weight: 900; font-size: 26px;
+    letter-spacing: -0.025em; line-height: 1; margin: 0; white-space: nowrap;
+    color: var(--text);
+  }
+  .wordmark span { color: var(--safe); }
+
+  .strip {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 18px;
+    height: 56px; flex-wrap: nowrap; overflow: hidden;
+    background: none; border: none; padding: 0; position: static;
+  }
+  .col-main { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; gap: 16px; min-height: 0; min-width: 0; }
+
+  /* Left rail restored. Rainfall, the citizen report control, the legend and
+     the drainage note all lived here before the Figma pass; the frame has no
+     left column, so they had scattered into the map and scrubber. */
+  .rail-left {
+    grid-column: 1; grid-row: 2;
+    display: flex; flex-direction: column; min-height: 0; overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--hairline);
+    overscroll-behavior: contain;
+  }
+  .rail-left::-webkit-scrollbar { width: 7px; }
+  .rail-left::-webkit-scrollbar-thumb { background: var(--hairline-2); border-radius: 4px; }
+  .rail-left .block { padding: 14px 15px; border-bottom: 1px solid var(--hairline); }
+  .rail-left .block:last-child { border-bottom: none; }
+  .rail-left .block-title { font-size: 10px; letter-spacing: .15em; margin-bottom: 10px; }
+  .rail-left .presets { margin-top: 10px; }
+  .rain-readout { display: flex; align-items: baseline; gap: 6px; }
+  .rain-value { font-family: var(--ff-display); font-weight: 800; font-size: 34px;
+                line-height: 1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+  .rain-unit { font-size: 10px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+  .rain-name { font-family: var(--ff-display); font-weight: 700; font-size: 12px;
+               letter-spacing: .05em; text-transform: uppercase; color: var(--safe); margin: 5px 0 2px; }
+  .btn-report-rail {
+    width: 100%; padding: 11px; border: 1px solid #A78BFA; border-radius: 2px; color: #A78BFA;
+    font-family: var(--ff-display); font-size: 11px; letter-spacing: .09em;
+    text-transform: uppercase; font-weight: 700;
+    transition: background .16s var(--ease-out), color .16s var(--ease-out);
+  }
+  .btn-report-rail:hover,
+  .btn-report-rail[aria-pressed="true"] { background: #A78BFA; color: var(--ink); }
+  .rail-left .btn-report-kb, .rail-left .btn-clear-reports {
+    position: static; width: 100%; margin-top: 7px; background: none;
+  }
+  .rail-left .disclosure-btn { width: 100%; justify-content: space-between; }
+  .rail-left .disclosure-body { position: static; width: auto; box-shadow: none;
+                                border: none; padding: 12px 0 0; background: none; }
+  .attrib-note { font-size: 10px; color: var(--muted); line-height: 1.55; margin: 0; }
+  .attrib-note strong { color: var(--text); font-weight: 600; }
+  .rail-right { grid-column: 3; grid-row: 2;
+                display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+                background: var(--surface); border: 1px solid var(--hairline);
+                position: static; width: auto; }
+  /* Two independently scrolling panes, so the alert feed can never be pushed
+     off the bottom by a 13-row zone list. */
+  .rail-pane { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .rail-pane + .rail-pane { border-top: 1px solid var(--hairline-2); }
+  .rail-pane::-webkit-scrollbar { width: 7px; }
+  .rail-pane::-webkit-scrollbar-thumb { background: var(--hairline-2); border-radius: 4px; }
+  .pane-title { position: sticky; top: 0; z-index: 1; margin: 0; padding: 14px 16px 12px;
+                background: var(--surface); border-bottom: 1px solid var(--hairline); }
+
+  /* ---- hero: Figma 1:5, 135px tall, 24px sides / 16px top-bottom ---- */
+  .hero-card {
+    flex: 0 0 auto; min-height: 135px;
+    background: #101A24;
+    border: 1px solid var(--ac, #FFC93C);
+    padding: 16px 24px;
+    display: flex; flex-direction: column; justify-content: center; gap: 6px;
+    transition: border-color 300ms var(--ease-out);
+    box-shadow: none; overflow: hidden;
+  }
+  .hero-title { font-family: var(--ff-display); font-weight: 700; font-size: 12px;
+                letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  /* Figma 1:7 measured 57px tall -> 52px Archivo */
+  .hero-state { font-family: var(--ff-display); font-weight: 900; font-size: 52px;
+                line-height: 1.02; letter-spacing: -0.04em; color: var(--ac, #FFC93C);
+                transition: color 300ms var(--ease-out); white-space: nowrap; }
+  .hero-action { margin: 0; font-size: 14px; line-height: 1.4; color: #EAF2F8;
+                 display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+                 overflow: hidden; }
+  .hero-prep { color: var(--muted); }
+  .hero-prep b { color: #EAF2F8; font-weight: 600; }
+
+  /* ---- row: citizen 472 + the rainfall slot beside it ---- */
+  .row-two { flex: 0 0 auto; display: block; height: 95px; }
+  .nb-card {
+    background: #101A24; border: 2px solid #A78BFA;
+    padding: 14px 20px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    min-width: 0; box-shadow: none;
+  }
+  .nb-title { font-family: var(--ff-display); font-weight: 700; font-size: 12px;
+              letter-spacing: .1em; text-transform: uppercase; color: #A78BFA; margin: 0; }
+  .nb-counts { margin: 0; font-size: 13px; line-height: 1.35; color: var(--muted);
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nb-counts .nb-n { color: #A78BFA; font-family: var(--ff-mono); font-weight: 700; }
+  .nb-counts .nb-zone { color: var(--text); }
+  .nb-btn { align-self: flex-start; background: none; padding: 0; color: #A78BFA;
+            font-family: var(--ff-display); font-weight: 700; font-size: 12px;
+            letter-spacing: .08em; text-transform: uppercase; }
+  .nb-btn:hover { color: var(--text); }
+  .nb-btn[aria-pressed="true"] { color: var(--text); }
+  .nb-note, .nb-text { display: contents; }
+
+  .cond-card { background: var(--surface); border: 1px solid var(--hairline);
+               padding: 12px 18px; display: flex; flex-direction: column;
+               justify-content: space-between; min-width: 0; }
+  .cond-title { font-family: var(--ff-display); font-weight: 700; font-size: 11px;
+                letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+                margin: 0; display: flex; align-items: baseline; gap: 10px; }
+  .cond-read { letter-spacing: 0; text-transform: none; color: var(--text);
+               font-family: var(--ff-mono); font-size: 13px; font-weight: 600; }
+  .cond-read b { color: var(--safe); font-family: var(--ff-display); margin-left: 6px; }
+  .presets { display: flex; gap: 5px; flex-wrap: wrap; }
+
+  /* ---- map fills the remaining height ---- */
+  .map-wrap { position: relative; flex: 1 1 auto; min-height: 0;
+              border: 1px solid var(--hairline); overflow: hidden; }
+  #map { position: absolute; inset: 0; background: var(--ink); z-index: 0; }
+  .leaflet-container { background: var(--ink); font-family: var(--ff-ui); }
+  .map-grade { position: absolute; inset: 0; z-index: 400; pointer-events: none;
+    background: radial-gradient(115% 85% at 50% 45%, rgba(8,13,20,0) 52%, rgba(8,13,20,.45) 90%, rgba(8,13,20,.72) 100%); }
+  .btn-report-map {
+    position: absolute; left: 14px; bottom: 14px; z-index: 500;
+    padding: 11px 18px; background: #A78BFA; color: #150826; border-radius: 2px;
+    font-family: var(--ff-display); font-weight: 800; font-size: 11px;
+    letter-spacing: .09em; text-transform: uppercase;
+  }
+  .btn-report-map:hover { filter: brightness(1.1); }
+  .btn-report-map[aria-pressed="true"] { background: var(--text); color: var(--ink); }
+  .btn-report-kb, .btn-clear-reports {
+    position: absolute; left: 14px; bottom: 58px; z-index: 500;
+    padding: 8px 13px; border: 1px solid #A78BFA; border-radius: 2px; color: #A78BFA;
+    font-size: 10px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700;
+    background: rgba(8,13,20,.92); width: auto; margin: 0;
+  }
+  .btn-clear-reports { bottom: 96px; border-color: var(--hairline-2); color: var(--muted); }
+  .btn-report-kb[hidden], .btn-clear-reports[hidden] { display: none; }
+  .report-hint { display: none; }
+
+  /* ---- scrubber: Figma 1:15, 60px tall ---- */
+  .scrub {
+    grid-column: 1 / -1; grid-row: 3; position: relative;
+    height: 60px; background: var(--surface); border: 1px solid var(--hairline);
+    display: flex; align-items: center; gap: 16px; padding: 0 18px;
+  }
+  .scrub-label { font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+                 color: var(--muted); font-weight: 700; white-space: nowrap; }
+  .scrub-now { font-family: var(--ff-display); font-weight: 800; font-size: 20px;
+               letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .scrub-mode { font-size: 10px; letter-spacing: .11em; text-transform: uppercase;
+                font-weight: 700; white-space: nowrap; }
+  .scrub-track { position: relative; flex: 1 1 auto; min-width: 0; }
+  .ticks { display: flex; justify-content: space-between; padding: 0 6px; margin-top: -4px; }
+  .scrub-disc { display: flex; gap: 6px; }
+  .scrub-disc .disclosure-btn { width: auto; padding: 7px 11px; border: 1px solid var(--hairline-2);
+                                border-radius: 2px; font-size: 10px; }
+  .scrub .disclosure-body {
+    position: absolute; right: 18px; bottom: 68px; width: 390px; z-index: 600;
+    background: var(--surface); border: 1px solid var(--hairline-2);
+    padding: 16px 18px; box-shadow: var(--panel-shadow); margin: 0;
+  }
+  .sweep-cta { position: absolute; left: 18px; bottom: 68px; z-index: 600;
+               width: auto; margin: 0; padding: 11px 16px; }
+
+  /* ============================================================
+     CONTROLS
+     ============================================================ */
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 26px; background: transparent; margin: 0; cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-runnable-track { height: 4px; background: var(--hairline-2); border-radius: 2px; }
+  input[type="range"]::-moz-range-track { height: 4px; background: var(--hairline-2); border-radius: 2px; }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 18px; height: 18px; margin-top: -7px;
+    border-radius: 50%; background: var(--text); border: 4px solid var(--ink);
+    box-shadow: 0 2px 8px rgba(0,0,0,.7);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--text); border: 4px solid var(--ink);
+    box-shadow: 0 2px 8px rgba(0,0,0,.7);
+  }
+  #scrub::-webkit-slider-thumb { background: var(--safe); }
+  #scrub::-moz-range-thumb { background: var(--safe); }
+
+
+  .preset {
+    padding: 5px 9px; border: 1px solid var(--hairline); border-radius: 2px;
+    font-size: 11px; color: var(--muted);
+    transition: color .16s var(--ease-out), border-color .16s var(--ease-out), background .16s var(--ease-out);
+  }
+  .preset:hover { color: var(--text); border-color: var(--hairline-2); }
+  .preset[aria-pressed="true"] { color: var(--ink); background: var(--text); border-color: var(--text); font-weight: 600; }
+
+  /* ---- time scrubber ---- */
+
+  .btn-run {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 11px 20px;
+    background: var(--safe); color: var(--ink);
+    border-radius: 2px;
+    font-family: var(--ff-display);
+    font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 800;
+    transition: filter .16s var(--ease-out), opacity .16s var(--ease-out);
+  }
+  .btn-run:hover { filter: brightness(1.12); }
+  .btn-run[disabled] { opacity: .4; cursor: default; }
+  .btn-run svg { width: 11px; height: 11px; fill: currentColor; }
+
+
+  .sweep-cta:hover { filter: brightness(1.12); }
+  .sweep-cta[hidden] { display: none; }
+  .tick {
+    font-size: 10px; color: var(--muted); font-family: var(--ff-mono); font-weight: 500;
+    position: relative; padding-top: 9px;
+    transition: color .16s var(--ease-out);
+  }
+  .tick::before { content: ""; position: absolute; top: 0; left: 50%; width: 1px; height: 5px; background: var(--hairline-2); }
+  .tick[data-active="true"] { color: var(--text); font-weight: 700; }
+  /* Observed vs forecast — NOAA FIM's honesty rule. */
+  .tick[data-observed="true"]  { border-bottom: 2px solid var(--safe); }
+  .tick[data-observed="false"] { border-bottom: 1px dashed var(--hairline-2); }
+
+  /* ============================================================
+     ZONE LIST
+     ============================================================ */
+  .zone-list { display: flex; flex-direction: column; }
+  .zone-row {
+    display: grid; grid-template-columns: 4px 1fr auto; gap: 11px;
+    align-items: center; padding: 11px 16px 11px 13px;
+    border-bottom: 1px solid var(--hairline);
+    width: 100%; text-align: left;
+    transition: background .14s var(--ease-out);
+  }
+  .zone-row:focus-visible { background: var(--surface-2); }
+  @media (hover: hover) and (pointer: fine) {
+    .zone-row:hover { background: var(--surface-2); }
+  }
+  .zone-bar { width: 4px; height: 32px; border-radius: 1px; }
+  .zone-name { font-size: 14px; font-weight: 600; line-height: 1.25; }
+  .zone-name-ml { font-family: 'Noto Sans Malayalam', var(--ff-ui); font-size: 11px; color: var(--muted); font-weight: 400; }
+  .zone-metrics { text-align: right; }
+  .zone-depth {
+    font-family: var(--ff-display); font-weight: 800;
+    font-size: 19px; line-height: 1; letter-spacing: -0.035em;
+    font-variant-numeric: tabular-nums;
+  }
+  .zone-depth small { font-size: 10px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+  .zone-level { font-size: 9px; letter-spacing: 0.13em; text-transform: uppercase; font-weight: 700; }
+
+  /* ============================================================
+     ALERT FEED
+     ============================================================ */
+  .feed { display: flex; flex-direction: column; }
+  .alert { padding: 14px 16px; border-bottom: 1px solid var(--hairline); display: flex; flex-direction: column; gap: 6px; }
+  .alert-head { display: flex; align-items: baseline; gap: 8px; }
+  .alert-level { font-size: 9px; letter-spacing: 0.13em; text-transform: uppercase; font-weight: 800; }
+  .alert-zone { font-size: 13px; font-weight: 600; }
+  .alert-time { margin-left: auto; font-size: 10px; color: var(--muted); font-family: var(--ff-mono); }
+  .alert-body { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+  .alert-ack {
+    align-self: flex-start; padding: 6px 11px;
+    background: var(--human); color: var(--ink); border-radius: 2px;
+    font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase; font-weight: 700;
+    transition: filter .16s var(--ease-out);
+  }
+  .alert-ack:hover { filter: brightness(1.12); }
+  .alert-acked {
+    font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase; font-weight: 700;
+    color: var(--human); display: inline-flex; align-items: center; gap: 5px;
+  }
+  .alert-acked::before { content: "✓"; }
+
+  /* Unacknowledged Warning pulses until a dispatcher acknowledges — an
+     operational state borrowed from ATC collision alerts, not decoration. */
+  .alert[data-pulse="true"] .alert-level {
+    animation: pulse 1.5s ease-in-out infinite;
+    animation-delay: var(--pulse-delay, 0ms);
+  }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .3 } }
+
+  .empty { padding: 16px; font-size: 12px; color: var(--muted); line-height: 1.55; }
+
+  /* ============================================================
+     HUMAN-IN-THE-LOOP — violet, always outside the risk ramp.
+     ============================================================ */
+  .btn-report {
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 11px;
+    border: 1px solid var(--human); border-radius: 2px; color: var(--human);
+    font-family: var(--ff-display);
+    font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; font-weight: 700;
+    transition: background .16s var(--ease-out), color .16s var(--ease-out);
+  }
+  .btn-report:hover, .btn-report[aria-pressed="true"] { background: var(--human); color: var(--ink); }
+  .report-hint { font-size: 11px; color: var(--muted); margin-top: 9px; line-height: 1.5; }
+  .btn-report-kb { margin-top: 7px; }
+  .btn-report-kb[hidden], .btn-clear-reports[hidden] { display: none; }
+  .btn-clear-reports {
+    width: 100%; margin-top: 7px; padding: 8px;
+    border: 1px solid var(--hairline-2); border-radius: 2px; color: var(--muted);
+    font-size: 10px; letter-spacing: .09em; text-transform: uppercase; font-weight: 600;
+    transition: color .16s var(--ease-out), border-color .16s var(--ease-out);
+  }
+  .btn-clear-reports:hover { color: var(--text); border-color: var(--muted); }
+  .report-count { color: var(--human); font-weight: 600; }
+
+  /* ============================================================
+     LEGEND — collapsible, in the left rail. No longer over the map.
+     ============================================================ */
+  .disclosure-btn {
+    width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-family: var(--ff-display);
+    font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 700;
+    color: var(--muted);
+    transition: color .16s var(--ease-out);
+  }
+  .disclosure-btn:hover { color: var(--text); }
+  .disclosure-btn .caret { transition: transform .18s var(--ease-out); font-size: 9px; }
+  .disclosure-btn[aria-expanded="true"] .caret { transform: rotate(90deg); }
+  .disclosure-body { margin-top: 13px; }
+  .disclosure-body[hidden] { display: none; }
+
+  .legend-row { display: grid; grid-template-columns: 11px 1fr; gap: 9px; margin-bottom: 10px; align-items: start; }
+  .legend-row:last-child { margin-bottom: 0; }
+  .legend-sw { width: 11px; height: 11px; border-radius: 2px; margin-top: 3px; }
+  .legend-name { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+  .legend-band { font-size: 10px; color: var(--muted); font-family: var(--ff-mono); }
+  .legend-desc { font-size: 10px; color: var(--muted); line-height: 1.45; margin-top: 2px; }
+
+  .attrib-note { font-size: 10px; color: var(--muted); line-height: 1.55; }
+  .attrib-note strong { color: var(--text); font-weight: 600; }
+
+  .prov-body dt { color: var(--text); font-size: 9px; letter-spacing: .13em; text-transform: uppercase; margin-top: 11px; font-weight: 700; }
+  .prov-body dt:first-of-type { margin-top: 0; }
+  .prov-body dd { margin: 3px 0 0; font-size: 10px; color: var(--muted); line-height: 1.5; }
+  .pop-est { color: var(--muted); font-size: 9px; }
+
+  /* zoom control, rehomed into the rail */
+  .zoombar { display: flex; gap: 5px; margin-top: 11px; }
+  .zoombar button {
+    flex: 1; padding: 6px; border: 1px solid var(--hairline); border-radius: 2px;
+    color: var(--muted); font-family: var(--ff-mono); font-size: 13px; line-height: 1;
+    transition: color .16s var(--ease-out), border-color .16s var(--ease-out);
+  }
+  .zoombar button:hover { color: var(--text); border-color: var(--hairline-2); }
+
+  /* ============================================================
+     MAP OVERLAYS
+     ============================================================ */
+  /* Zone fills interpolate on discrete changes (scrubber drag, preset change).
+     Transitions retarget natively, so a fast drag never queues or restarts.
+     During the RUN sweep the rAF loop already interpolates every frame, so
+     .sweeping switches these off — otherwise the two smoothings compound and
+     the fill visibly lags the clock. */
+  .leaflet-interactive {
+    transition: fill 300ms var(--ease-out),
+                fill-opacity 300ms var(--ease-out),
+                stroke-opacity 300ms var(--ease-out),
+                stroke-width 300ms var(--ease-out);
+  }
+  .sweeping .leaflet-interactive { transition: none; }
+
+  /* Sweep progress — the light-line travelling the scrubber track. */
+  .scrub-track { position: relative; }
+  .scrub-progress {
+    position: absolute; left: 0; top: 11px; height: 4px;
+    background: var(--safe); border-radius: 2px;
+    width: 0; pointer-events: none;
+    box-shadow: 0 1px 4px rgba(0,0,0,.5);
+  }
+
+  /* New alert entries. Transition-based and applied only to genuinely new
+     rows, so a re-render never restarts them. */
+  .alert {
+    opacity: 1; transform: translateY(0);
+    transition: opacity 260ms var(--ease-out), transform 260ms var(--ease-out);
+  }
+  .alert[data-enter="true"] { opacity: 0; transform: translateY(-8px); }
+
+  .leaflet-popup-content-wrapper {
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--hairline-2); border-radius: 3px;
+    box-shadow: var(--panel-shadow);
+  }
+  .leaflet-popup-tip { background: var(--surface); border: 1px solid var(--hairline-2); }
+  .leaflet-popup-content { margin: 14px 15px; font-family: var(--ff-ui); }
+  .leaflet-popup-close-button { color: var(--muted) !important; }
+  .leaflet-container a.leaflet-popup-close-button:hover { color: var(--text) !important; }
+
+  .pop-name { font-size: 15px; font-weight: 700; }
+  .pop-name-ml { font-family: 'Noto Sans Malayalam', var(--ff-ui); font-size: 11px; color: var(--muted); font-weight: 400; }
+  .pop-level { font-size: 9px; letter-spacing: .13em; text-transform: uppercase; font-weight: 800; margin-top: 6px; }
+  .pop-depth {
+    font-family: var(--ff-display); font-weight: 800;
+    font-size: 44px; letter-spacing: -0.045em; margin: 8px 0 0; line-height: 0.92;
+    font-variant-numeric: tabular-nums;
+  }
+  .pop-depth small { font-size: 13px; color: var(--muted); font-weight: 500; letter-spacing: 0; }
+  .pop-sub { font-size: 10px; color: var(--muted); letter-spacing: .05em; }
+  .pop-grid { display: grid; grid-template-columns: auto auto; gap: 4px 16px; margin-top: 11px; font-size: 11px; }
+  .pop-k { color: var(--muted); }
+  .pop-v { text-align: right; font-weight: 500; }
+  .pop-note { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--hairline); font-size: 10px; color: var(--muted); line-height: 1.5; }
+  .pop-dio {
+    width: 100%; margin-top: 11px; padding: 9px;
+    border: 1px solid var(--safe); border-radius: 2px; color: var(--safe);
+    font-family: var(--ff-display);
+    font-size: 10px; letter-spacing: .11em; text-transform: uppercase; font-weight: 700;
+    transition: background .16s var(--ease-out), color .16s var(--ease-out);
+  }
+  .pop-dio:hover { background: var(--safe); color: var(--ink); }
+
+  .pin-report {
+    width: 15px; height: 15px; border-radius: 50%;
+    background: var(--human); border: 2px solid var(--ink);
+    box-shadow: 0 0 0 2px var(--human), 0 2px 6px rgba(0,0,0,.55);
+  }
+
+  /* ============================================================
+     LAYER 3 — OFFLINE BADGE
+     ============================================================ */
+  .topnav { display: flex; gap: 7px; margin-left: 22px; flex: 0 0 auto; }
+  .topnav a {
+    padding: 7px 12px; border: 1px solid var(--hairline-2); border-radius: 2px;
+    color: var(--muted); text-decoration: none;
+    font-family: var(--ff-display); font-size: 11px; font-weight: 700;
+    letter-spacing: .1em; text-transform: uppercase; white-space: nowrap;
+    transition: color .16s var(--ease-out), border-color .16s var(--ease-out), background .16s var(--ease-out);
+  }
+  .topnav a:hover { color: var(--text); border-color: var(--muted); background: var(--surface-2); }
+
+  .chip-offline {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 11px; border: 1px solid var(--safe); border-radius: 2px;
+    font-size: 9px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700;
+    color: var(--safe); white-space: nowrap;
+  }
+  .chip-offline .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .chip-offline[data-online="true"] { border-color: var(--hairline-2); color: var(--muted); }
+  .off-sub { font-weight: 400; letter-spacing: .02em; text-transform: none; color: var(--muted); }
+
+  /* ============================================================
+     LAYER 4 — DEPTH BADGES
+     Always-on, centred on each zone. Deliberately small and
+     high-contrast so they label the map without obscuring it.
+     ============================================================ */
+  .leaflet-tooltip.depth-badge {
+    background: rgba(8,13,20,.9);
+    border: 1px solid var(--hairline-2);
+    color: var(--text);
+    border-radius: 2px; padding: 2px 6px;
+    font-family: var(--ff-mono); font-size: 11px; font-weight: 700;
+    white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,.6);
+    transition: border-color 300ms var(--ease-out), color 300ms var(--ease-out);
+  }
+  .leaflet-tooltip.depth-badge::before { display: none; }
+
+  .map-hint {
+    position: absolute; bottom: calc(var(--scrub-h, 116px) + 22px); left: 50%; transform: translateX(-50%);
+    z-index: 500;
+    background: var(--human); color: var(--ink);
+    padding: 9px 17px; border-radius: 2px;
+    font-family: var(--ff-display);
+    font-size: 11px; letter-spacing: .09em; text-transform: uppercase; font-weight: 800;
+  }
+  .map-hint[hidden] { display: none; }
+
+  .map-notice {
+    position: absolute; top: calc(var(--strip-h) + 12px); left: 50%;
+    transform: translateX(-50%); z-index: 500;
+    max-width: 460px; margin: 0;
+    background: var(--surface); border: 1px solid var(--watch);
+    border-radius: 2px; padding: 11px 15px;
+    font-size: 12px; color: var(--text); line-height: 1.5;
+  }
+  .map-notice[hidden] { display: none; }
+
+  /* ============================================================
+     RESPONSIVE
+     ============================================================ */
+  @media (max-width: 1280px) {
+    :root { --rail-l: 216px; --rail-r: 312px; }
+    .stat-hero .stat-value { font-size: 42px; }
+    .stat-pop .stat-value { font-size: 26px; }
+  }
+
+  @media (max-width: 1040px) {
+    .issued { display: none; }
+    :root { --rail-l: 200px; --rail-r: 280px; }
+  }
+
+  @media (max-width: 900px) {
+    html, body { overflow: auto; }
+    #map { position: relative; height: 52dvh; inset: auto; }
+    .map-grade { position: absolute; height: 52dvh; }
+    .hud { position: static; }
+    .strip {
+      position: static; height: auto; flex-wrap: wrap; gap: 14px;
+      padding: 12px 14px; background: var(--ink);
+      border-bottom: 1px solid var(--hairline);
+    }
+    .wordmark { font-size: 24px; }
+    .strip-stats { width: 100%; margin-left: 0; gap: 20px; }
+    .stat-hero .stat-value { font-size: 38px; }
+    .rail {
+      position: static; width: auto; margin: var(--gap); bottom: auto;
+      max-height: none; overflow: visible;
+    }
+    .scrub { position: static; margin: var(--gap); }
+    .map-hint { position: fixed; top: 12px; }
+  }
+
+  /* DIRECTION.md §2.4: reduced motion drops MOVEMENT but keeps opacity, so
+     state changes are still perceivable. A blanket transition kill removed
+     both, which is neither. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-property: opacity, color, background-color, border-color !important;
+      transition-duration: 140ms !important;
+    }
+    body[data-diving="true"] #map,
+    body[data-diving="true"] .map-grade { transform: none; }
+    .alert[data-enter="true"] { transform: none; }
+  }
+
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; margin: -1px;
+    padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  /* ============================================================
+     ZONE DIORAMA — stylized street-level water view. Second
+     signature moment. Illustrative, NOT literal 3D terrain.
+     ============================================================ */
+  /* Blackout veil bridges the two surfaces. The map zooms toward the zone
+     underneath it while this fades up, so the cut happens at full black and
+     you never see a hard swap. */
+  .veil {
+    position: fixed; inset: 0; z-index: 850; background: #000;
+    opacity: 0; pointer-events: none;
+    transition: opacity 400ms var(--ease-out);
+  }
+  .veil[data-on="true"] { opacity: 1; }
+
+  .diorama {
+    position: fixed; inset: 0; z-index: 900;
+    background: var(--ink);
+    display: flex; flex-direction: column;
+    opacity: 1;
+    transition: opacity 320ms var(--ease-out);
+  }
+  .diorama[hidden] { display: none; }
+  .diorama[data-enter="true"] { opacity: 0; }
+
+  /* Map pulls back slightly as the veil rises — a parallax cue that we moved
+     INTO the scene rather than cutting to a different page. Transform only,
+     so it stays on the compositor. */
+  #map, .map-grade { transition: transform 900ms var(--ease-out), filter 900ms var(--ease-out); }
+  /* Exit faster than entry: 900ms in, 520ms back out. */
+  body:not([data-diving="true"]) #map,
+  body:not([data-diving="true"]) .map-grade {
+    transition: transform 520ms var(--ease-out), filter 520ms var(--ease-out);
+  }
+  body[data-diving="true"] #map,
+  body[data-diving="true"] .map-grade { transform: scale(1.35); filter: brightness(0.55); }
+
+  #diorama-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  .dio-top {
+    position: relative; z-index: 2;
+    display: flex; align-items: flex-start; gap: 20px;
+    padding: 20px 24px;
+    background: linear-gradient(to bottom, rgba(6,10,16,.96) 45%, rgba(6,10,16,0));
+  }
+  .dio-name { font-family: var(--ff-display); font-weight: 800; font-size: 30px; letter-spacing: -0.03em; line-height: 1; }
+  .dio-name-ml { font-family: 'Noto Sans Malayalam', var(--ff-ui); font-size: 14px; color: var(--muted); margin-top: 5px; }
+  .dio-level { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; font-weight: 800;
+               margin-top: 10px; text-shadow: 0 1px 10px rgba(0,0,0,.9); }
+
+  .dio-close {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 10px 16px;
+    border: 1px solid var(--hairline-2); border-radius: 2px;
+    color: var(--text);
+    font-family: var(--ff-display);
+    font-size: 11px; letter-spacing: .11em; text-transform: uppercase; font-weight: 700;
+    transition: border-color .16s var(--ease-out), background .16s var(--ease-out);
+  }
+  .dio-close:hover { background: var(--surface-2); border-color: var(--muted); }
+
+  .dio-readout {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+    display: flex; align-items: flex-end; gap: 22px;
+    padding: 26px 24px 22px;
+    background: linear-gradient(to top, rgba(6,10,16,.94) 30%, rgba(6,10,16,0));
+  }
+  .dio-depth {
+    font-family: var(--ff-display); font-weight: 900;
+    font-size: 92px; line-height: 0.84; letter-spacing: -0.055em;
+    font-variant-numeric: tabular-nums;
+  }
+  .dio-depth small { font-size: 22px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+  .dio-depth { color: var(--text); text-shadow: 0 2px 18px rgba(0,0,0,.8); }
+  .dio-meta { font-size: 12px; color: var(--text); line-height: 1.7; padding-bottom: 10px; }
+  .dio-meta strong { color: var(--text); font-weight: 600; }
+
+  .dio-note {
+    position: absolute; right: 24px; bottom: 26px; z-index: 3;
+    max-width: 270px; text-align: right;
+    font-size: 10px; color: var(--muted); line-height: 1.55;
+  }
+
+  .dio-fallback {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    padding: 40px; text-align: center; font-size: 13px; color: var(--muted); line-height: 1.6;
+  }
+
+  @media (max-width: 900px) {
+    .dio-depth { font-size: 58px; }
+    .dio-name { font-size: 22px; }
+    .dio-note { display: none; }
+    .dio-readout { left: 16px; bottom: 16px; gap: 14px; }
+  }
+</style>
+</head>
+
+<body>
+<!--
+  DIRECTION CONTRACT — JalNetra
+  THESIS: A street-level flood nowcast as a working control room. Refuses the
+  KPI-tile grid every civic dashboard ships; the map IS the surface and the
+  console floats on it.
+  OWN-WORLD: Wet-asphalt ink (#0A0F16) under a full-bleed dark map. IMD's
+  warning ramp (cyan/yellow/orange/red) at full saturation is the only
+  chromatic system; violet is reserved exclusively for human action. Archivo
+  at heavy weights for statement numbers, IBM Plex Mono for data.
+  STORY: A dispatcher reads which Kochi zones flood in the next two hours, a
+  citizen pins observed ground truth, the dispatcher acknowledges and acts.
+  FIRST VIEWPORT: Kochi edge-to-edge with the TP/Mullassery canal network.
+  Asymmetric floating panels — narrow rainfall rail left, wide ranked-zone and
+  alert stack right — with the time scrubber as a floating bar spanning
+  between them. The city risk index is the largest number on screen.
+  FORM: Console HUD. Pinned by DIRECTION.md — no concept roll was run; a
+  user-pinned direction beats the roll.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+-->
+
+
+<div class="hud">
+
+  <!-- ===== status strip: spans both columns ===== -->
+  <header class="strip">
+    <h1 class="wordmark">JAL<span>NETRA</span></h1>
+    <div class="issued">Nowcast <span class="num" id="issued-at">—</span> · valid to <span class="num" id="valid-to">—</span> IST</div>
+    <span class="chip-sim" title="No live rainfall feed and no model output. Every figure is a deterministic simulation.">Simulated</span>
+    <span class="chip-offline" id="offline-chip">
+      <span class="dot"></span><span id="offline-text">Offline-ready</span>
+      <span class="off-sub"><span class="num" id="offline-time">—</span></span>
+    </span>
+    <div class="strip-stats">
+      <div class="stat stat-hero">
+        <span class="stat-label">Deepest at <span id="stat-worst">—</span></span>
+        <span class="stat-value" id="stat-depth">—</span>
+      </div>
+      <div class="stat stat-pop">
+        <span class="stat-label">In Warning <span class="pop-est">est.</span></span>
+        <span class="stat-value" id="stat-pop">—</span>
+      </div>
+      <div class="stat stat-minor">
+        <span class="stat-label">Risk index</span>
+        <span class="stat-value" id="stat-index">—</span>
+      </div>
+    </div>
+    <nav class="topnav" aria-label="Console navigation">
+      <a href="admin.html">Admin</a><a href="login.html">Sign out</a>
+    </nav>
+  </header>
+
+  <!-- ===== left rail ===== -->
+  <aside class="rail-left">
+    <div class="block">
+      <h2 class="block-title">Rainfall scenario</h2>
+      <div class="rain-readout">
+        <span class="rain-value" id="rain-value">62</span>
+        <span class="rain-unit">mm/hr</span>
+      </div>
+      <div class="rain-name" id="rain-name">Heavy</div>
+      <input type="range" id="rain" min="0" max="120" step="1" value="62"
+             aria-label="Rainfall intensity in millimetres per hour">
+      <div class="presets" id="presets" role="group" aria-label="Rainfall presets"></div>
+    </div>
+
+    <div class="block">
+      <h2 class="block-title">Citizen report</h2>
+      <button class="btn-report-rail" id="btn-report" aria-pressed="false">Report waterlogging</button>
+      <button class="btn-report-kb" id="btn-report-zone" hidden></button>
+      <button class="btn-clear-reports" id="btn-clear-reports" hidden>Clear reports</button>
+      <p class="attrib-note" style="margin-top:9px">Ground truth from the street.
+        Drops a pin and nudges nearby zone risk — client-side only, never sent anywhere.</p>
+    </div>
+
+    <div class="block">
+      <button class="disclosure-btn" id="legend-btn" aria-expanded="false" aria-controls="legend-body">
+        <span>Warning level (IMD)</span><span class="caret">▶</span></button>
+      <div class="disclosure-body" id="legend-body" hidden></div>
+    </div>
+
+    <div class="block">
+      <button class="disclosure-btn" id="prov-btn" aria-expanded="false" aria-controls="prov-body">
+        <span>Data provenance</span><span class="caret">▶</span></button>
+      <div class="disclosure-body prov-body" id="prov-body" hidden>
+        <dl>
+          <dt>Real and citable</dt>
+          <dd>Zone list and coordinates from reporting on actual waterlogging. The TP and
+          Mullassery canal routes and their documented failure modes. The IMD warning
+          scale and the term “nowcast”.</dd>
+          <dt>Estimated — not sourced</dt>
+          <dd>Population per zone: approximations, <em>not</em> census figures.
+          Susceptibility is authored to be plausible, not derived from a DEM.</dd>
+          <dt>Does not exist</dt>
+          <dd>No live rainfall feed, no trained model. Every figure comes from a
+          deterministic simulation on this device. Nothing is deployed.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2 class="block-title">Drainage</h2>
+      <p class="attrib-note">
+        The <strong>Thevara–Perandoor Canal</strong> is Kochi Corporation's main drainage
+        artery — silted, encroached, and backs up at high tide. The
+        <strong>Mullassery Canal</strong> has a reverse slope, pushing water into the TP
+        Canal rather than away from it. Routes approximate, from Kerala Irrigation
+        Department material.
+      </p>
+      <p class="attrib-note" style="margin-top:9px; font-size:9px">
+        © OpenStreetMap contributors · © CARTO</p>
+    </div>
+  </aside>
+
+  <!-- ===== content column ===== -->
+  <div class="col-main">
+
+    <!-- Figma 1:5 — Hero · Action, 812x135 -->
+    <section class="hero-card" id="hero-card" aria-labelledby="hero-title">
+      <h2 class="hero-title" id="hero-title">What should you do right now?</h2>
+      <div class="hero-state" id="hero-state">—</div>
+      <p class="hero-action"><span id="hero-action">—</span>
+         <span class="hero-prep"><b>Bring:</b> <span id="hero-prep">—</span></span></p>
+    </section>
+
+    <!-- Figma 1:9 — Citizen · Reports, 472x95, plus the rainfall slot the
+         design leaves empty beside it. -->
+    <div class="row-two">
+      <section class="nb-card" aria-labelledby="nb-title">
+        <h2 class="nb-title" id="nb-title">Your neighbours are reporting</h2>
+        <p class="nb-counts" id="nb-counts">—</p>
+        <button class="nb-btn" id="btn-report-hero">Report your situation now</button>
+      </section>
+
+    </div>
+
+    <!-- Figma 1:13 — Map · Kochi, 1000 wide. Extended to fill the gap the
+         design leaves between the map and the scrubber. -->
+    <div class="map-wrap">
+      <div id="map" role="application" aria-label="Kochi flood risk map"></div>
+      <div class="map-grade" aria-hidden="true"></div>
+      <div class="map-hint" id="map-hint" hidden>Click the map to place your report</div>
+      <p class="map-notice" id="map-notice" role="status" hidden></p>
+    </div>
+
+  </div>
+
+    <!-- Figma 1:15 — Scrubber · Timeline, 1000x60 -->
+  <div class="scrub">
+    <span class="scrub-label">Horizon</span>
+    <span class="scrub-now" id="scrub-now">NOW</span>
+    <span class="scrub-mode" id="scrub-mode">observed</span>
+    <div class="scrub-track">
+      <div class="scrub-progress" id="scrub-progress" aria-hidden="true"></div>
+      <input type="range" id="scrub" min="0" max="4" step="1" value="0"
+             aria-label="Forecast horizon in minutes from now" aria-valuetext="Now, observed">
+      <div class="ticks" id="ticks"></div>
+    </div>
+    <button class="btn-run" id="btn-run"></button>
+    <button class="sweep-cta" id="sweep-cta" hidden></button>
+  </div>
+
+  <!-- Figma 1:17 — Right Rail · Zones + Alerts, 320 wide -->
+  <aside class="rail-right panel">
+    <section class="rail-pane" aria-labelledby="zones-title">
+      <h2 class="block-title pane-title" id="zones-title">Zones by depth <span id="zone-count" class="num"></span></h2>
+      <div class="zone-list" id="zone-list"></div>
+    </section>
+    <section class="rail-pane" aria-labelledby="feed-title">
+      <h2 class="block-title pane-title" id="feed-title">Alert feed</h2>
+      <div class="feed" id="feed"></div>
+    </section>
+  </aside>
+</div>
+
+<!-- ================= ZONE DIORAMA ================= -->
+<div class="veil" id="veil" aria-hidden="true"></div>
+<section class="diorama" id="diorama" hidden role="dialog" aria-modal="true" aria-labelledby="dio-name">
+  <canvas id="diorama-canvas"></canvas>
+
+  <div class="dio-top">
+    <div>
+      <div class="dio-name" id="dio-name">—</div>
+      <div class="dio-name-ml" id="dio-name-ml" lang="ml"></div>
+      <div class="dio-level" id="dio-level"></div>
+    </div>
+    <button class="dio-close" id="dio-close">Back to console <span aria-hidden="true">esc</span></button>
+  </div>
+
+  <div class="dio-readout">
+    <div class="dio-depth" id="dio-depth">0<small> cm</small></div>
+    <div class="dio-meta" id="dio-meta"></div>
+  </div>
+
+  <p class="dio-note">
+    Stylized illustration, not literal terrain. Buildings and street are
+    abstracted to give the water depth a human scale. The depth figure is the
+    contract's <code>depthCm</code> for this zone at the current settings.
+  </p>
+</section>
+
+<div aria-live="polite" class="visually-hidden" id="live-region"></div>
+
+<script src="vendor/leaflet.js"></script>
+<!-- Three.js r128, vendored locally: the diorama must work with no network. -->
+<script src="vendor/three.r128.min.js"></script>
+<script>
+/* ==================================================================
+   JalNetra — flood nowcast console
+
+   THE SEAM: getFloodRisk() is the ONLY point of contact with the
+   backend. Its shape is frozen in CLAUDE.md. Swapping the mock for the
+   real model means replacing that function's body and nothing else.
+
+   Tide state is deliberately absent — open question with the backend
+   teammate, tracked in DIRECTION.md §4.
+   ================================================================== */
+
+/* ---------- Zone seed data -------------------------------------------
+   Coordinates and hotspot list: real, from reporting on actual waterlogging.
+   population: ESTIMATED. Not census data. Labelled as such in the UI.
+   baseSusceptibility: AUTHORED to be physically plausible. Not from a DEM.
+   onCanal: whether the zone sits on the TP Canal drainage line.
+   -------------------------------------------------------------------- */
+const ZONES = [
+  { id:'kalamassery',  name:'Kalamassery',      ml:'കളമശ്ശേരി',      lat:10.054, lng:76.320, baseSusceptibility:0.82, population:41000, onCanal:false },
+  { id:'edappally',    name:'Edappally',        ml:'ഇടപ്പള്ളി',       lat:10.025, lng:76.308, baseSusceptibility:0.88, population:36500, onCanal:false },
+  { id:'palarivattom', name:'Palarivattom',     ml:'പാലാരിവട്ടം',     lat:10.007, lng:76.305, baseSusceptibility:0.7, population:24800, onCanal:false },
+  { id:'kaloor',       name:'Kaloor',           ml:'കലൂർ',           lat: 9.997, lng:76.299, baseSusceptibility:0.95, population:18400, onCanal:true  },
+  { id:'vennala',      name:'Vennala',          ml:'വെണ്ണല',         lat: 9.998, lng:76.323, baseSusceptibility:0.22, population:21200, onCanal:false },
+  { id:'kacheripady',  name:'Kacheripady',      ml:'കച്ചേരിപ്പടി',    lat: 9.985, lng:76.283, baseSusceptibility:0.48, population:14900, onCanal:false },
+  { id:'marinedrive',  name:'Marine Drive',     ml:'മറൈൻ ഡ്രൈവ്',   lat: 9.982, lng:76.276, baseSusceptibility:0.33, population: 9700, onCanal:false },
+  { id:'cbd_mgroad',   name:'CBD / MG Road',    ml:'എം.ജി. റോഡ്',    lat: 9.978, lng:76.283, baseSusceptibility:0.63, population:16300, onCanal:false },
+  { id:'elamkulam',    name:'Elamkulam',        ml:'ഇളംകുളം',        lat: 9.973, lng:76.301, baseSusceptibility:0.44, population:15600, onCanal:true  },
+  { id:'kadavanthra',  name:'Kadavanthra',      ml:'കടവന്ത്ര',        lat: 9.970, lng:76.298, baseSusceptibility:0.57, population:17800, onCanal:true  },
+  { id:'vyttila',      name:'Vyttila',          ml:'വൈറ്റില',        lat: 9.967, lng:76.318, baseSusceptibility:0.74, population:28400, onCanal:false },
+  { id:'panampilly',   name:'Panampilly Nagar', ml:'പനമ്പിള്ളി നഗർ',  lat: 9.965, lng:76.295, baseSusceptibility:0.52, population:13100, onCanal:true  },
+  { id:'thevara',      name:'Thevara',          ml:'തേവര',           lat: 9.942, lng:76.292, baseSusceptibility:0.38, population:19600, onCanal:true  }
+];
+
+/* admin.html writes zone edits to this key. If present they replace the seed
+   list above, so configuration lives on its own surface and the dispatcher
+   console stays read-only for operations. */
+const LS_ZONES = 'jalnetra.zones.v1';
+const LS_LOG   = 'jalnetra.calllog.v1';
+let ZONE_SOURCE = 'built-in defaults';
+try {
+  const raw = localStorage.getItem(LS_ZONES);
+  if (raw) {
+    const custom = JSON.parse(raw);
+    if (Array.isArray(custom) && custom.length) {
+      ZONES.length = 0; custom.forEach(z => ZONES.push(z));
+      ZONE_SOURCE = 'admin overrides';
+    }
+  }
+} catch (e) { console.warn('[zones] stored overrides unreadable, using defaults', e); }
+
+/* Canal geometry — approximate routes from Kerala Irrigation Dept material. */
+const TP_CANAL = [
+  [9.9435,76.2955],[9.9520,76.2968],[9.9585,76.2975],[9.9680,76.2985],
+  [9.9755,76.2960],[9.9840,76.2968],[9.9950,76.2985],[10.0035,76.2972],[10.0090,76.2960]
+];
+const MULLASSERY_CANAL = [
+  [9.9835,76.2790],[9.9852,76.2828],[9.9862,76.2872],[9.9878,76.2930]
+];
+
+/* ---------- Level definitions — IMD's four-colour scale ---------------
+   Wording follows IMD (No warning / Watch / Alert / Warning). Contract ids
+   stay frozen. Consequence lines follow GOV.UK's what + what-to-do pattern.
+   -------------------------------------------------------------------- */
+const LEVELS = {
+  safe:   { id:'safe',   imd:'No warning', color:'#17E0CC', band:'under 10 cm', what:'No significant water expected.', act:'No action needed.' },
+  watch:  { id:'watch',  imd:'Watch',      color:'#FFC93C', band:'10–24 cm',    what:'Surface water on roads.',        act:'Drive slowly. Stay updated.' },
+  high:   { id:'high',   imd:'Alert',      color:'#FF7A1A', band:'25–49 cm',    what:'Waterlogging. Roads risky.',     act:'Avoid low-lying routes.' },
+  severe: { id:'severe', imd:'Warning',    color:'#FF2E4D', band:'50 cm+',      what:'Deep water. Roads impassable.',  act:'Take action now. Danger to life.' }
+};
+
+/* Depth bands, in cm. Anchored to what the water actually does to a street:
+   ~15 cm and vehicles lose traction, ~30 cm and most cars stall, ~50 cm and
+   the road is genuinely impassable and dangerous on foot.
+
+   These were widened from an earlier 5/15/30 set, which put ELEVEN of thirteen
+   zones at Warning on the default scenario — DIRECTION.md §2.1's rule is
+   "red appears rarely; when it arrives it has to mean something", and eleven
+   simultaneous red zones means nothing. At 62 mm/hr +120 this now yields four
+   Warning zones, which is exactly the settle line §2.4 imagined, and leaves
+   92 and 120 mm/hr somewhere worse to go. */
+const BAND_WATCH = 10, BAND_ALERT = 25, BAND_WARNING = 50;
+
+/* The 0-1 risk index is scaled so the band edges land on recognisable values:
+   Watch 0.13, Alert 0.33, Warning 0.66. "risk >= 0.66 means Warning" is now
+   true BY CONSTRUCTION rather than being a second, unrelated scale that
+   happened to disagree with the depth bands. */
+const RISK_FULL = 75;
+
+const PRESETS = [
+  { label:'Dry', mm:0 }, { label:'Drizzle', mm:8 }, { label:'Moderate', mm:26 },
+  { label:'Heavy', mm:62 }, { label:'Very heavy', mm:92 }, { label:'Cloudburst', mm:120 }
+];
+
+const OFFSETS = [0, 30, 60, 90, 120];
+
+/* ------------------------------------------------------------------
+   ACTION LADDER — what a person should actually DO at each level.
+   The forecast's job is to end in an instruction; a number without one
+   is an unfinished thought.
+   ------------------------------------------------------------------ */
+const ACTIONS = {
+  safe:   { state: 'SAFE',    colour: '#17E0CC',
+            action: 'Nothing to do. Know your route out.',
+            prep:   'Save the Corporation control room number. Learn which way is higher ground from your door.' },
+  watch:  { state: 'WATCH',   colour: '#FFC93C',
+            action: 'Move valuables and documents off the floor.',
+            prep:   'Charge phones. Fill drinking water. Park vehicles higher while roads are still clear.' },
+  high:   { state: 'PREPARE', colour: '#FF7A1A',
+            action: 'Pack your go-bag now, before water reaches the road.',
+            prep:   'Documents, medicines, valuables, food, water, torch, charger, sturdy shoes, raincoat.' },
+  severe: { state: 'ACT NOW', colour: '#FF2E4D',
+            action: 'Move to higher ground or an upper floor immediately.',
+            prep:   'Take the go-bag and go. Switch off mains power. Do not enter the water to collect anything.' }
+};
+
+/* ==================================================================
+   THE SEAM — replace this function's body with a real fetch(). Nothing
+   else in this file changes.
+   ================================================================== */
+
+/**
+ * Returns flood risk for every zone at a given rainfall + time offset.
+ * @param {number} rainfallMmHr  0–120
+ * @param {0|30|60|90|120} timeOffsetMin
+ */
+async function getFloodRisk(rainfallMmHr, timeOffsetMin) {
+  const t0 = performance.now();
+  const zones = ZONES.map(z => {
+    const depthCm = mockDepth(z, rainfallMmHr, timeOffsetMin);
+    const prevDepth = mockDepth(z, rainfallMmHr, Math.max(0, timeOffsetMin - 30));
+    const delta = depthCm - prevDepth;
+    return {
+      id: z.id, name: z.name, lat: z.lat, lng: z.lng,
+      risk: Math.min(1, depthCm / RISK_FULL),
+      level: levelForDepth(depthCm),
+      depthCm,
+      population: z.population,
+      trend: delta >= 1.5 ? 'rising' : (delta <= -1.5 ? 'falling' : 'steady')
+    };
+  });
+  logCall(rainfallMmHr, timeOffsetMin, zones.length, performance.now() - t0);
+  return { generatedAt: new Date().toISOString(), rainfallMmHr, timeOffsetMin, zones };
+}
+
+/* Records each contract call so admin.html can show model status. Capped, and
+   wrapped — a full or blocked localStorage must never break the console. */
+function logCall(rain, off, n, ms) {
+  try {
+    const log = JSON.parse(localStorage.getItem(LS_LOG) || '[]');
+    log.unshift({ at: Date.now(), rain, off, zones: n, ms: ms.toFixed(1) });
+    localStorage.setItem(LS_LOG, JSON.stringify(log.slice(0, 60)));
+  } catch (e) { /* storage unavailable — status panel simply stays empty */ }
+}
+
+/* Deterministic depth model. Tuned so zones cross warning thresholds at
+   DIFFERENT horizons — that staggering is what makes the sweep read as risk
+   spreading rather than every zone flipping at once.
+   Calibration: Kaloor at 62 mm/hr, +60 min → 41 cm / 0.82 / severe, exactly
+   the worked example in CLAUDE.md's contract. */
+const SOFT_CAP  = 130;   // water spreads and drains past a point
+const DEPTH_K   = 158;   // overall scale
+const SUSC_EXP  = 2.6;   // separation between low ground and high
+const ACCUM_T0  = 0.8;   // antecedent wetness — see below
+
+function mockDepth(z, rainfallMmHr, timeOffsetMin) {
+  if (rainfallMmHr <= 0) return 0;
+  const rainFactor = Math.pow(rainfallMmHr / 120, 1.35);
+  const hours = timeOffsetMin / 60;
+  // ACCUM_T0 shifts the curve so "Now" already carries water. The previous
+  // 0.1 meant the horizon started at 7% of saturation — i.e. it assumed rain
+  // began the instant you pressed play. A nowcast issued during a cloudburst
+  // must show the water that is ALREADY on the street; at 120 mm/hr "Now"
+  // now reads 48 cm at Kaloor instead of 14 cm.
+  const accum = 1 - Math.exp(-0.7 * (hours + ACCUM_T0));
+  const susc = Math.pow(z.baseSusceptibility, SUSC_EXP);
+  const raw = rainFactor * susc * accum * DEPTH_K;
+  return Math.round(SOFT_CAP * (1 - Math.exp(-raw / SOFT_CAP)));
+}
+
+function levelForDepth(cm) {
+  if (cm >= BAND_WARNING) return 'severe';
+  if (cm >= BAND_ALERT)   return 'high';
+  if (cm >= BAND_WATCH)   return 'watch';
+  return 'safe';
+}
+
+/* ==================================================================
+   STATE
+   ================================================================== */
+const state = {
+  rainfall: 62,
+  offsetIndex: 0,
+  horizon: 0,          // continuous, 0–120 min. The scrubber's five stops
+                       // are legal contract values; the sweep runs between them.
+  data: null,
+  selectedZone: null,  // drives the right-rail detail panel
+  acked: new Set(),
+  reports: [],
+  reportMode: false,
+  sweeping: false
+};
+
+/* ==================================================================
+   MAP
+   ================================================================== */
+/* The map is NOT allowed to take the console down with it. Everything below
+   is guarded: if Leaflet is missing or throws, mapOK stays false, the paint
+   functions skip the map, and the rails, scrubber, stats and feed still work.
+   The forecast is readable without a basemap; a blank page is not. */
+let map = null, mapOK = false, reportLayer = null;
+const zoneLayers = new Map();
+
+try {
+  if (!window.L) throw new Error('Leaflet failed to load');
+
+  map = L.map('map', {
+    center: [9.995, 76.300], zoom: 12,
+    zoomControl: false, attributionControl: false
+  });
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    subdomains: 'abcd', maxZoom: 19
+  }).addTo(map);
+
+  L.polyline(TP_CANAL, { color: '#2E8CA6', weight: 4, opacity: 0.9, lineJoin: 'round' })
+    .addTo(map).bindTooltip('Thevara–Perandoor Canal: main drainage artery', { sticky: true });
+
+  L.polyline(MULLASSERY_CANAL, { color: '#2E8CA6', weight: 2.5, opacity: 0.65, dashArray: '6,5', lineJoin: 'round' })
+    .addTo(map).bindTooltip('Mullassery Canal: reverse slope, drains into TP Canal', { sticky: true });
+
+  ZONES.forEach(z => {
+  const circle = L.circle([z.lat, z.lng], {
+    radius: 760, color: LEVELS.safe.color, weight: 1.5, opacity: 0.9,
+    fillColor: LEVELS.safe.color, fillOpacity: 0.12
+  }).addTo(map);
+  // Clicking a zone on the map goes straight to the street-level view.
+  // The reference numbers live in the right-rail detail panel instead of a
+  // popup, so reading them never blocks the map.
+  // Depth lives in the rail list, not on the map. Permanent badges on 13
+  // zones collided badly wherever zones sit close together.
+  circle.bindTooltip(`${z.name} — click for street level`, { sticky: true });
+  circle.on('click', () => {
+    if (state.reportMode) return;   // in report mode the click places a pin
+    selectZone(z.id);
+    Diorama.open(z.id);
+  });
+  zoneLayers.set(z.id, circle);
+  });
+
+  reportLayer = L.layerGroup().addTo(map);
+
+  map.on('click', e => {
+    if (!state.reportMode) return;
+    addReport(e.latlng.lat, e.latlng.lng);
+  });
+
+  map.on('tileerror', () => {
+    document.getElementById('map').style.background = '#080D14';
+    showMapNotice('Basemap tiles unavailable — forecast values are unaffected.');
+  });
+
+  mapOK = true;
+} catch (err) {
+  console.error('[map]', err);
+  showMapNotice('Basemap unavailable. Every forecast value on this screen is unaffected — the zone list, alerts and scrubber all work.');
+}
+
+function showMapNotice(msg) {
+  const el = document.getElementById('map-notice');
+  if (!el) return;
+  el.textContent = msg;
+  el.hidden = false;
+}
+
+/* Placing a report — shared by the map click and the keyboard path, so the
+   citizen mechanic is never mouse-only. */
+function addReport(lat, lng, label) {
+  state.reports.push({ lat, lng, at: Date.now() });
+  if (mapOK && reportLayer) {
+    L.marker([lat, lng], {
+      icon: L.divIcon({ className: '', html: '<div class="pin-report"></div>', iconSize: [15,15], iconAnchor: [7,7] })
+    }).addTo(reportLayer).bindTooltip('Citizen report: observed waterlogging');
+  }
+  setReportMode(false);
+  announce(`Report placed${label ? ' at ' + label : ''}. Nearby zone risk raised.`);
+  render();
+}
+
+/* ==================================================================
+   CITIZEN REPORT NUDGE — client-side only.
+   ================================================================== */
+function reportNudge(zone) {
+  let nudge = 0;
+  for (const r of state.reports) {
+    const d = haversine(zone.lat, zone.lng, r.lat, r.lng);
+    if (d < 1200) nudge += 0.08 * (1 - d / 1200);
+  }
+  return Math.min(nudge, 0.25);
+}
+
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 6371000, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/* ==================================================================
+   RENDER
+   ================================================================== */
+/* ---- Frame cache -----------------------------------------------------
+   getFloodRisk() is only ever called with the five legal offsets the
+   contract defines. Intermediate horizons during the sweep are LINEAR
+   INTERPOLATIONS between two contract samples, computed for rendering
+   only — the contract is never called with an illegal value, and at every
+   resting position (0/30/60/90/120) the numbers on screen are exact
+   contract output.
+   -------------------------------------------------------------------- */
+let FRAMES = [];
+let framesKey = '';
+
+function applyReportNudge(payload) {
+  payload.zones.forEach(z => {
+    const nudge = reportNudge(z);
+    if (nudge > 0) {
+      z.risk = Math.min(1, z.risk + nudge);
+      z.depthCm = Math.round(z.depthCm * (1 + nudge));
+      z.level = levelForDepth(z.depthCm);
+      z.nudged = true;
+    }
+  });
+}
+
+async function ensureFrames() {
+  const key = state.rainfall + '|' + state.reports.length;
+  if (key === framesKey && FRAMES.length === OFFSETS.length) return;
+  const next = [];
+  for (const o of OFFSETS) {
+    const p = await getFloodRisk(state.rainfall, o);
+    applyReportNudge(p);
+    next.push(p);
+  }
+  FRAMES = next;
+  framesKey = key;
+}
+
+/* Sample the model at any horizon, interpolating between contract frames. */
+function sampleAt(horizonMin) {
+  const t = Math.max(0, Math.min(120, horizonMin));
+  const i = Math.min(OFFSETS.length - 2, Math.floor(t / 30));
+  const a = FRAMES[i], b = FRAMES[i + 1];
+  const f = (t - OFFSETS[i]) / 30;
+  const zones = a.zones.map((za, k) => {
+    const zb = b.zones[k];
+    const depthCm = za.depthCm + (zb.depthCm - za.depthCm) * f;
+    return {
+      id: za.id, name: za.name, lat: za.lat, lng: za.lng,
+      population: za.population, trend: f < 0.5 ? za.trend : zb.trend,
+      nudged: za.nudged,
+      depthCm,
+      risk: za.risk + (zb.risk - za.risk) * f,
+      level: levelForDepth(depthCm)
+    };
+  });
+  return { generatedAt: a.generatedAt, rainfallMmHr: state.rainfall, timeOffsetMin: t, zones };
+}
+
+function renderAt(horizonMin) {
+  const payload = sampleAt(horizonMin);
+  state.horizon = horizonMin;
+  state.data = payload;
+  // Default the detail panel to the worst zone once, so it is never empty
+  // on load. After that it stays on whatever the user picked.
+  if (!state.selectedZone) {
+    const worst = payload.zones.slice().sort((a, b) => b.depthCm - a.depthCm)[0];
+    if (worst) state.selectedZone = worst.id;
+  }
+
+  paintHero(payload);
+  paintNeighbours();
+  paintOffline(payload);
+  paintMap(payload);
+  paintStrip(payload);
+  paintZoneList(payload);
+  paintZoneDetail(payload);
+  paintFeed(payload);
+  paintScrubber(horizonMin);
+}
+
+/* Settle on an exact contract stop. */
+function setHorizon(h) {
+  renderAt(h);
+  const idx = OFFSETS.indexOf(h);
+  if (idx >= 0) state.offsetIndex = idx;
+}
+
+async function render() {
+  await ensureFrames();
+  renderAt(state.horizon);
+}
+
+function paintMap(payload) {
+  payload.zones.forEach(z => {
+    const layer = zoneLayers.get(z.id);
+    if (!layer) return;
+    const c = LEVELS[z.level].color;
+    layer.setStyle({
+      color: c, fillColor: c,
+      fillOpacity: 0.12 + z.risk * 0.52,
+      opacity: 0.4 + z.risk * 0.6,
+      weight: 1.5 + z.risk * 1.5
+    });
+  });
+}
+
+/* LAYER 1 — driven by the WORST zone, because the card answers a city-wide
+   "should I be doing something" rather than a per-zone lookup. */
+function paintHero(payload) {
+  const worst = payload.zones.slice().sort((a, b) => b.depthCm - a.depthCm)[0];
+  if (!worst) return;
+  const A = ACTIONS[worst.level], L2 = LEVELS[worst.level];
+  const card = document.getElementById('hero-card');
+  card.style.setProperty('--ac', A.colour);
+  card.style.setProperty('--ac-wash', A.colour + '26');
+  document.getElementById('hero-state').textContent = A.state;
+  document.getElementById('hero-action').textContent = A.action;
+  document.getElementById('hero-prep').textContent = A.prep;
+  card.setAttribute('aria-label',
+    `${A.state}. ${A.action} Worst zone ${worst.name}, ${Math.round(worst.depthCm)} centimetres, ${L2.imd}.`);
+}
+
+/* LAYER 2 — counts grouped by nearest zone, newest first. Reads the existing
+   state.reports array; the pin system itself is unchanged. */
+function nearestZone(lat, lng) {
+  let best = null, bd = Infinity;
+  for (const z of ZONES) {
+    const d = haversine(lat, lng, z.lat, z.lng);
+    if (d < bd) { bd = d; best = z; }
+  }
+  return best;
+}
+
+function agoLabel(ms) {
+  const m = Math.max(0, Math.round((Date.now() - ms) / 60000));
+  if (m < 1) return 'just now';
+  if (m < 60) return m + ' min ago';
+  const h = Math.round(m / 60);
+  return h === 1 ? '1 hr ago' : h + ' hrs ago';
+}
+
+function paintNeighbours() {
+  const counts = new Map();
+  let newest = 0;
+  for (const r of state.reports) {
+    const z = nearestZone(r.lat, r.lng);
+    if (!z) continue;
+    counts.set(z.name, (counts.get(z.name) || 0) + 1);
+    if (r.at && r.at > newest) newest = r.at;
+  }
+  const el = document.getElementById('nb-counts');
+  const note = document.getElementById('nb-note') || { };
+
+  if (!counts.size) {
+    el.innerHTML = '<span style="color:var(--muted)">No reports on this device yet.</span>';
+    if (note) note.textContent = '';
+    return;
+  }
+  const parts = [...counts.entries()].sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => `<span class="nb-n">${n}</span> in <span class="nb-zone">${name}</span>`);
+  el.innerHTML = parts.join(' · ');
+  if ('textContent' in note) note.textContent = `Latest ${agoLabel(newest)}.`;
+}
+
+/* LAYER 3 — reflect the real connection state rather than always claiming
+   offline mode. Either way the forecast is computed locally. */
+function paintOffline(payload) {
+  const chip = document.getElementById('offline-chip');
+  const on = navigator.onLine;
+  chip.dataset.online = String(on);
+  document.getElementById('offline-text').textContent = on ? 'Offline-ready' : 'Offline mode';
+  if (payload) document.getElementById('offline-time').textContent = hhmm(new Date(payload.generatedAt));
+}
+
+function paintStrip(payload) {
+  const zones = payload.zones;
+  // Warning zones only. Counting Alert too made this number swallow most of
+  // the city and stop discriminating.
+  const atRisk = zones.filter(z => z.level === 'severe');
+  const pop = atRisk.reduce((s, z) => s + z.population, 0);
+  const index = zones.reduce((s, z) => s + z.risk, 0) / zones.length;
+  // Rank on depth: risk saturates at RISK_FULL, so top zones can tie at 1.00.
+  const worst = zones.slice().sort((a,b) => b.depthCm - a.depthCm)[0];
+
+  // Hero: the deepest predicted water, in cm, with the zone that owns it.
+  const depthEl = document.getElementById('stat-depth');
+  depthEl.innerHTML = worst
+    ? Math.round(worst.depthCm) + '<small> cm</small>'
+    : '—';
+  depthEl.style.color = worst ? LEVELS[worst.level].color : 'var(--text)';
+  document.getElementById('stat-worst').textContent =
+    worst && worst.depthCm > 0 ? worst.name : 'no water predicted';
+
+  document.getElementById('stat-pop').textContent = pop.toLocaleString('en-IN');
+
+  const idxEl = document.getElementById('stat-index');
+  idxEl.textContent = index.toFixed(2);
+
+  const issued = new Date(payload.generatedAt);
+  const valid = new Date(issued.getTime() + 120 * 60000);
+  document.getElementById('issued-at').textContent = hhmm(issued);
+  document.getElementById('valid-to').textContent = hhmm(valid);
+}
+
+function hhmm(d) {
+  return d.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'Asia/Kolkata' });
+}
+
+/* Rows are built once and updated in place. Rebuilding innerHTML at 60fps
+   during a sweep would destroy focus, restart entry transitions, and repaint
+   the whole rail every frame. */
+const zoneRowEls = new Map();
+const zoneDetEls = new Map();
+let zoneOrderKey = '';
+
+function buildZoneRows() {
+  const list = document.getElementById('zone-list');
+  list.innerHTML = '';
+  ZONES.forEach(seed => {
+    const row = document.createElement('button');
+    row.className = 'zone-row';
+    row.dataset.zone = seed.id;
+    row.innerHTML = `
+      <span class="zone-bar"></span>
+      <span>
+        <span class="zone-name">${seed.name}<span class="zone-nudge" hidden style="color:var(--human)" title="Adjusted by a citizen report"> ●</span></span><br>
+        <span class="zone-name-ml" lang="ml">${seed.ml}</span>
+      </span>
+      <span class="zone-metrics">
+        <span class="zone-depth"><span class="zone-depth-n">0</span><small> cm</small></span><br>
+        <span class="zone-level"></span>
+      </span>`;
+    row.setAttribute('aria-expanded', 'false');
+    // Selecting a row fills the detail panel and centres the map — it does
+    // NOT open the diorama. Only a click on the map itself does that.
+    row.addEventListener('click', () => {
+      selectZone(seed.id);
+      if (mapOK) map.setView([seed.lat, seed.lng], Math.max(map.getZoom(), 13));
+    });
+    // Keyboard users get the same detail on focus, without a click.
+    row.addEventListener('focus', () => selectZone(seed.id));
+    list.appendChild(row);
+    const det = document.createElement('div');
+    det.className = 'zone-detail'; det.hidden = true;
+    list.appendChild(det);
+    zoneRowEls.set(seed.id, row);
+    zoneDetEls.set(seed.id, det);
+  });
+  document.getElementById('zone-count').textContent = ZONES.length;
+}
+
+function paintZoneList(payload) {
+  const ranked = payload.zones.slice().sort((a, b) => b.depthCm - a.depthCm);
+
+  ranked.forEach(z => {
+    const row = zoneRowEls.get(z.id);
+    if (!row) return;
+    const L2 = LEVELS[z.level];
+    row.querySelector('.zone-bar').style.background = L2.color;
+    row.querySelector('.zone-depth-n').textContent = Math.round(z.depthCm);
+    const lvl = row.querySelector('.zone-level');
+    lvl.textContent = L2.imd;
+    lvl.style.color = L2.color;
+    row.querySelector('.zone-nudge').hidden = !z.nudged;
+  });
+
+  // Reorder only when the ranking actually changes — moving DOM nodes every
+  // frame is wasted work and fights the browser's paint.
+  const key = ranked.map(z => z.id).join(',');
+  if (key !== zoneOrderKey) {
+    zoneOrderKey = key;
+    const list = document.getElementById('zone-list');
+    ranked.forEach(z => {
+      list.appendChild(zoneRowEls.get(z.id));
+      list.appendChild(zoneDetEls.get(z.id));
+    });
+  }
+}
+
+let feedSig = '';
+let feedIds = new Set();
+
+function paintFeed(payload) {
+  const alerts = payload.zones
+    .filter(z => z.level === 'high' || z.level === 'severe')
+    .sort((a,b) => b.depthCm - a.depthCm);
+
+  const feed = document.getElementById('feed');
+  // Stamp alerts at the nearest forecast stop, not the continuous horizon —
+  // otherwise the signature below changes every frame and defeats the diff.
+  const offset = Math.round(state.horizon / 30) * 30;
+  const when = offset === 0 ? 'now' : `+${offset} min`;
+
+  // Rebuild only when the feed's content actually changes. During a sweep
+  // this fires a handful of times (as zones cross thresholds) instead of
+  // ~300 times, which is what lets the entry transition survive.
+  const sig = alerts.map(z => z.id + z.level + (state.acked.has(z.id) ? '1' : '0')).join('|') + when;
+  if (sig === feedSig) return;
+  const prevIds = feedIds;
+  feedSig = sig;
+  feedIds = new Set(alerts.map(z => z.id));
+
+  if (!alerts.length) {
+    feed.innerHTML = `<p class="empty">No zones at Alert or Warning for this
+      scenario. Raise the rainfall or move the horizon forward.</p>`;
+    return;
+  }
+
+  // Only the three deepest unacknowledged Warnings pulse. The FAA precedent
+  // this borrows from assumes a SCARCE alert; a wall of synchronised blinking
+  // is a different signal from three, and a worse one.
+  const pulsing = new Set(
+    alerts.filter(z => z.level === 'severe' && !state.acked.has(z.id))
+          .slice(0, 3).map(z => z.id));
+
+  feed.innerHTML = alerts.map((z, i) => {
+    const L2 = LEVELS[z.level];
+    const acked = state.acked.has(z.id);
+    const pulse = pulsing.has(z.id);
+    const isNew = !prevIds.has(z.id);
+    return `
+      <article class="alert" data-pulse="${pulse}" data-enter="${isNew}" style="--pulse-delay:${i * 260}ms">
+        <div class="alert-head">
+          <span class="alert-level" style="color:${L2.color}">${L2.imd}</span>
+          <span class="alert-zone">${z.name}</span>
+          <span class="alert-time num">${when}</span>
+        </div>
+        <p class="alert-body">
+          ${L2.what} ${L2.act}
+          <br>${Math.round(z.depthCm)} cm predicted · ${z.population.toLocaleString('en-IN')} people
+          <span class="pop-est">est.</span> · ${z.trend}
+        </p>
+        ${acked ? `<span class="alert-acked">Acknowledged</span>`
+                : `<button class="alert-ack" data-ack="${z.id}">Acknowledge &amp; dispatch</button>`}
+      </article>`;
+  }).join('');
+
+  // Release the entry transition on the next frame, staggered 30–80ms so
+  // entries cascade instead of all landing at once.
+  const entering = feed.querySelectorAll('.alert[data-enter="true"]');
+  requestAnimationFrame(() => {
+    entering.forEach((el, i) => {
+      el.style.transitionDelay = (i * 48) + 'ms';
+      el.dataset.enter = 'false';
+      setTimeout(() => { el.style.transitionDelay = ''; }, 260 + i * 48);
+    });
+  });
+
+  feed.querySelectorAll('[data-ack]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.ack;
+      const zone = state.data.zones.find(x => x.id === id);
+      state.acked.add(id);
+      // Speak the human name — this used to read out the raw key, e.g.
+      // "cbd underscore mgroad acknowledged".
+      announce(`${zone ? zone.name : id} acknowledged. Crew dispatched.`);
+      feedSig = '';           // force a rebuild so the acked state renders
+      paintFeed(state.data);
+      // The rebuild deletes the button that was just activated, dropping focus
+      // to <body>. Put it back where the user was.
+      const restored = document.querySelector(`.alert [data-ack]`) ||
+                       document.querySelector('.alert-acked');
+      if (restored) { restored.setAttribute('tabindex','-1'); restored.focus(); }
+    });
+  });
+}
+
+/* ---- Zone detail panel -----------------------------------------------
+   This is where the old map popup's content lives now. Clicking a zone on
+   the map goes straight to the diorama; the reference numbers sit here in
+   the rail instead, always available and never covering the map.
+   -------------------------------------------------------------------- */
+/* One zone open at a time, expanded under its own row. Replaces the separate
+   "Zone detail" panel, which ate a third of the rail and pushed the alert feed
+   off screen entirely. */
+function selectZone(id) {
+  state.selectedZone = (state.selectedZone === id) ? null : id;
+  zoneRowEls.forEach((row, rid) => row.setAttribute('aria-expanded', String(rid === state.selectedZone)));
+  zoneDetEls.forEach((det, rid) => { det.hidden = rid !== state.selectedZone; });
+  if (state.data) paintZoneDetail(state.data);
+}
+
+function paintZoneDetail(payload) {
+  const id = state.selectedZone;
+  if (!id) return;
+  const host = zoneDetEls.get(id);
+  const z = payload.zones.find(x => x.id === id);
+  const seed = ZONES.find(s => s.id === id);
+  if (!host || !z || !seed) return;
+  const L2 = LEVELS[z.level];
+  host.innerHTML = `
+    <p class="zd-level" style="color:${L2.color}">${L2.imd}: ${L2.what} ${L2.act}</p>
+    <div class="pop-grid">
+      <span class="pop-k">Risk index</span><span class="pop-v num">${z.risk.toFixed(2)}</span>
+      <span class="pop-k">Population <span class="pop-est">est.</span></span><span class="pop-v num">${z.population.toLocaleString('en-IN')}</span>
+      <span class="pop-k">Trend</span><span class="pop-v">${z.trend}</span>
+      <span class="pop-k">On TP Canal</span><span class="pop-v">${seed.onCanal ? 'yes' : 'no'}</span>
+    </div>
+    ${seed.onCanal ? `<p class="pop-note">Sits on the Thevara-Perandoor Canal, Kochi's main
+      drainage artery: silted, encroached, and backs up at high tide.</p>` : ''}
+    ${z.nudged ? `<p class="pop-note" style="color:var(--human)">Risk raised by a nearby citizen report.</p>` : ''}
+    <button class="zd-dio" data-diorama="${z.id}">Street level &rarr;</button>`;
+}
+
+function paintScrubber(horizon) {
+  const h = Math.round(horizon);
+  const observed = h === 0;
+  document.getElementById('scrub-now').textContent = observed ? 'NOW' : `+${h}`;
+  const modeEl = document.getElementById('scrub-mode');
+  modeEl.textContent = observed ? 'observed' : 'forecast';
+  modeEl.style.color = observed ? 'var(--safe)' : 'var(--muted)';
+
+  // The light-line runs continuously even while the thumb snaps between the
+  // five legal stops — the control has five positions, the clock does not.
+  document.getElementById('scrub-progress').style.width = (horizon / 120 * 100) + '%';
+
+  const nearest = Math.round(horizon / 30);
+  const scrub = document.getElementById('scrub');
+  if (Number(scrub.value) !== nearest) scrub.value = String(nearest);
+  scrub.setAttribute('aria-valuetext', observed ? 'Now, observed' : `Plus ${h} minutes — forecast`);
+
+  document.querySelectorAll('.tick').forEach((t, i) => {
+    t.dataset.active = String(i === nearest);
+  });
+}
+
+/* ==================================================================
+   STATIC UI
+   ================================================================== */
+function buildStaticUI() {
+  document.getElementById('presets').innerHTML = PRESETS.map(p =>
+    `<button class="preset" data-mm="${p.mm}" aria-pressed="false">${p.label}</button>`).join('');
+  document.querySelectorAll('.preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.rainfall = Number(btn.dataset.mm);
+      document.getElementById('rain').value = String(state.rainfall);
+      syncRainReadout();
+      render();
+    });
+  });
+
+  document.getElementById('ticks').innerHTML = OFFSETS.map((o, i) =>
+    `<span class="tick" data-observed="${o === 0}" data-active="${i === 0}">${o === 0 ? 'NOW' : '+' + o}</span>`).join('');
+
+  document.getElementById('legend-body').innerHTML =
+    ['safe','watch','high','severe'].map(k => {
+      const L2 = LEVELS[k];
+      return `
+        <div class="legend-row">
+          <span class="legend-sw" style="background:${L2.color}"></span>
+          <span>
+            <span class="legend-name" style="color:${L2.color}">${L2.imd}</span>
+            <span class="legend-band"> ${L2.band}</span>
+            <div class="legend-desc">${L2.what} ${L2.act}</div>
+          </span>
+        </div>`;
+    }).join('');
+}
+
+function syncRainReadout() {
+  document.getElementById('rain-value').textContent = state.rainfall;
+  const name = PRESETS.slice().reverse().find(p => state.rainfall >= p.mm);
+  document.getElementById('rain-name').textContent = name ? name.label : '';
+  document.querySelectorAll('.preset').forEach(b => {
+    b.setAttribute('aria-pressed', String(Number(b.dataset.mm) === state.rainfall));
+  });
+}
+
+function setReportMode(on) {
+  state.reportMode = on;
+  document.getElementById('btn-report').setAttribute('aria-pressed', String(on));
+  document.getElementById('btn-report-hero').setAttribute('aria-pressed', String(on));
+  document.getElementById('map-hint').hidden = !on;
+  document.getElementById('map').style.cursor = on ? 'crosshair' : '';
+
+  // Keyboard alternative to clicking the map: place the report at the centre
+  // of whichever zone is currently selected in the rail.
+  const kb = document.getElementById('btn-report-zone');
+  const sel = state.selectedZone && ZONES.find(z => z.id === state.selectedZone);
+  kb.hidden = !(on && sel);
+  if (on && sel) kb.textContent = `Place report at ${sel.name}`;
+
+  document.getElementById('btn-clear-reports').hidden = state.reports.length === 0;
+
+  const n = state.reports.length;
+  const hintEl = document.getElementById('report-hint');
+  if (hintEl) hintEl.innerHTML = n
+    ? `<span class="report-count">${n} report${n>1?'s':''} placed.</span> Nearby zone
+       risk raised. Client-side only, never sent anywhere.`
+    : `Ground truth from the street. Click the map, or select a zone and use the
+       keyboard button. Client-side only, never sent anywhere.`;
+
+  // The instruction has to be spoken, not just shown — it was previously only
+  // visible in .map-hint, which a screen reader user never encounters.
+  if (on) announce(sel
+    ? `Report mode on. Click the map, or place a report at ${sel.name}. Escape to cancel.`
+    : 'Report mode on. Click the map to place a report. Escape to cancel.');
+}
+
+function clearReports() {
+  state.reports = [];
+  if (reportLayer) reportLayer.clearLayers();
+  setReportMode(false);
+  announce('All citizen reports cleared.');
+  render();
+}
+
+function announce(msg) { document.getElementById('live-region').textContent = msg; }
+
+function wireDisclosure(btnId, bodyId) {
+  const btn = document.getElementById(btnId), body = document.getElementById(bodyId);
+  btn.addEventListener('click', () => {
+    const open = body.hidden;
+    body.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+  });
+}
+
+/* ==================================================================
+   THE TWO-HOUR SWEEP — the signature moment.
+
+   Driven by requestAnimationFrame over a continuous horizon value, not a
+   setTimeout step loop, so the zone fills interpolate rather than jump.
+   Fully interruptible: grabbing the scrubber or pressing STOP cancels it
+   from wherever it is, and the CSS transitions take back over.
+
+   The horizon advances LINEARLY. Easing the clock would mean most of the
+   two hours elapses in the first instant, which is semantically wrong —
+   the drama comes from thresholds being crossed, not from the curve.
+   ================================================================== */
+const SWEEP_MS = 5200;
+const REDUCE = window.matchMedia('(prefers-reduced-motion: reduce)');
+let sweepRAF = null;
+
+function updateRunButton() {
+  const btn = document.getElementById('btn-run');
+  btn.innerHTML = state.sweeping
+    ? '<svg viewBox="0 0 10 10" aria-hidden="true"><rect x="0" y="0" width="10" height="10"/></svg> Stop'
+    : '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0 L10 5 L0 10 Z"/></svg> Run two-hour sweep';
+}
+
+function stopSweep() {
+  if (sweepRAF) { cancelAnimationFrame(sweepRAF); sweepRAF = null; }
+  if (!state.sweeping) return;
+  state.sweeping = false;
+  document.body.classList.remove('sweeping');
+  updateRunButton();
+}
+
+/* Hand the sweep's result straight to the diorama. The sweep answers "where
+   and when"; the diorama answers "what does 55 cm actually mean". Chaining
+   them makes one sequence out of two moments, and gives the street-level view
+   the discoverability it never had buried in a popup. */
+function showSweepCta(worst) {
+  const cta = document.getElementById('sweep-cta');
+  if (!worst || worst.depthCm < BAND_WATCH) { cta.hidden = true; return; }
+  cta.innerHTML = `Deepest: <strong>${worst.name}</strong>, ` +
+                  `<strong>${Math.round(worst.depthCm)} cm</strong>. See it at street level →`;
+  cta.dataset.diorama = worst.id;
+  cta.hidden = false;
+}
+
+function hideSweepCta() {
+  const cta = document.getElementById('sweep-cta');
+  if (cta) cta.hidden = true;
+}
+
+function startSweep() {
+  hideSweepCta();
+  if (state.sweeping) { stopSweep(); return; }
+
+  // Reduced motion: land on the result, skip the movement entirely.
+  if (REDUCE.matches) {
+    setHorizon(120);
+    announce('Horizon set to plus 120 minutes.');
+    return;
+  }
+
+  const from = state.horizon >= 119.5 ? 0 : state.horizon;
+  const dur = SWEEP_MS * (120 - from) / 120;
+  if (dur < 60) { setHorizon(120); return; }
+
+  state.sweeping = true;
+  document.body.classList.add('sweeping');
+  updateRunButton();
+
+  const t0 = performance.now();
+  const step = now => {
+    if (!state.sweeping) return;
+    const p = Math.min(1, (now - t0) / dur);
+    renderAt(from + (120 - from) * p);
+    if (p < 1) {
+      sweepRAF = requestAnimationFrame(step);
+    } else {
+      stopSweep();
+      setHorizon(120);        // settle exactly on a contract value
+      const n = state.data.zones.filter(z => z.level === 'severe').length;
+      const worst = state.data.zones.slice().sort((a, b) => b.depthCm - a.depthCm)[0];
+      announce(`Sweep complete. Plus 120 minutes. ${n} zone${n === 1 ? '' : 's'} at Warning. ` +
+               `Deepest ${worst.name}, ${Math.round(worst.depthCm)} centimetres.`);
+      showSweepCta(worst);
+    }
+  };
+  sweepRAF = requestAnimationFrame(step);
+}
+
+/* ==================================================================
+   ZONE DIORAMA — stylized street-level view of one zone, with water
+   risen to that zone's predicted depthCm at the current settings.
+
+   Explicitly ILLUSTRATIVE, not literal terrain: the street, buildings,
+   and figure are abstractions whose only job is to give the depth
+   number a human scale. Nothing here is surveyed. It reads depthCm and
+   adds no fields to the contract.
+
+   Three.js r128, vendored locally — no network at runtime. r128 has no
+   CapsuleGeometry, so the figure is built from cylinders and a sphere.
+   ================================================================== */
+const Diorama = (() => {
+  let renderer, scene, camera, water, waterGeo, rain, ready = false, raf = null;
+  let curDepth = 0, targetDepth = 0, t0 = 0, lastFocus = null, zoneId = null;
+  let camIn = 1;   // 0..1 camera arrival ease
+
+  // Deterministic per-zone layout: the same zone always looks the same.
+  function seeded(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return () => { h += 0x6D2B79F5; let x = Math.imul(h ^ (h >>> 15), 1 | h);
+      x ^= x + Math.imul(x ^ (x >>> 7), 61 | x); return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+  }
+
+  function init() {
+    const canvas = document.getElementById('diorama-canvas');
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    scene = new THREE.Scene();
+    /* PALETTE — five distinct HUE FAMILIES, not five shades of one blue.
+       Taken from the isometric/3D city references: their legibility comes from
+       warm ground against cool buildings against vivid water. Held at night
+       values so it still reads as a continuation of the console.
+         sky       deep indigo      #131C33
+         buildings cool slate       #3E5364 .. #58708A
+         road      WARM asphalt     #33302E  (brown-grey, deliberately not blue)
+         kerb      warm concrete    #4A4640
+         water     vivid, level-coloured, the most saturated thing on screen
+         figure    violet, emissive — human, per the console's colour doctrine */
+    scene.background = new THREE.Color(0x131C33);
+    scene.fog = new THREE.Fog(0x131C33, 34, 130);
+
+    camera = new THREE.PerspectiveCamera(52, 1, 0.1, 200);
+    camera.position.set(0, 1.75, 15);
+    camera.lookAt(0, 1.1, -10);
+
+    // Sky/ground split does most of the shaping work; the two directionals
+    // give edge definition. Values are deliberately well above the console's
+    // palette — an unlit dark scene is indistinguishable from a broken one.
+    scene.add(new THREE.HemisphereLight(0x6E86B8, 0x3A342C, 0.7));
+    scene.add(new THREE.AmbientLight(0x4A5A70, 0.28));
+    const key = new THREE.DirectionalLight(0xF2F8FF, 1.45);
+    key.position.set(9, 16, 7);
+    scene.add(key);
+    const rim = new THREE.DirectionalLight(0x2E8CA6, 0.55);
+    rim.position.set(-11, 7, -16);
+    scene.add(rim);
+
+    // Ground = warm concrete pavement. Warm against the cool buildings is the
+    // relationship that makes the reference images readable.
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(180, 180),
+      new THREE.MeshStandardMaterial({ color: 0x3B3833, roughness: 0.96 }));
+    ground.rotation.x = -Math.PI / 2;
+    scene.add(ground);
+
+    // Road = darker warm asphalt, distinctly browner than the pavement.
+    const road = new THREE.Mesh(
+      new THREE.PlaneGeometry(11, 170),
+      new THREE.MeshStandardMaterial({ color: 0x252220, roughness: 1 }));
+    road.rotation.x = -Math.PI / 2;
+    road.position.y = 0.012;
+    scene.add(road);
+
+    // Centre line — reads as a street rather than a strip, and gives the eye
+    // a perspective cue toward the vanishing point.
+    for (let i = 0; i < 26; i++) {
+      const dash = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.28, 2.4),
+        new THREE.MeshBasicMaterial({ color: 0xC9BFA8, transparent: true, opacity: 0.5 }));
+      dash.rotation.x = -Math.PI / 2;
+      dash.position.set(0, 0.02, 8 - i * 6);
+      scene.add(dash);
+    }
+
+    // Kerbs, so the road/pavement boundary is a real edge the water sits against
+    for (const side of [-1, 1]) {
+      const kerb = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5, 0.16, 170),
+        new THREE.MeshStandardMaterial({ color: 0x5C574E, roughness: 0.9 }));
+      kerb.position.set(side * 5.75, 0.08, -75);
+      scene.add(kerb);
+    }
+
+    // water — segmented so it can ripple
+    waterGeo = new THREE.PlaneGeometry(160, 160, 56, 56);
+    water = new THREE.Mesh(waterGeo, new THREE.MeshStandardMaterial({
+      color: 0x1E5C7A, transparent: true, opacity: 0.86,
+      roughness: 0.14, metalness: 0.5
+    }));
+    water.rotation.x = -Math.PI / 2;
+    water.position.y = 0;
+    scene.add(water);
+
+    // rain — short falling segments, count driven by the rainfall control
+    const RAIN_MAX = 1500;
+    const rg = new THREE.BufferGeometry();
+    const rp = new Float32Array(RAIN_MAX * 6);
+    for (let i = 0; i < RAIN_MAX; i++) {
+      const x = (Math.random() - 0.5) * 70, y = Math.random() * 34, z = (Math.random() - 0.5) * 90;
+      rp[i*6] = x;     rp[i*6+1] = y;        rp[i*6+2] = z;
+      rp[i*6+3] = x;   rp[i*6+4] = y - 0.42; rp[i*6+5] = z;
+    }
+    rg.setAttribute('position', new THREE.BufferAttribute(rp, 3));
+    rain = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({
+      color: 0x9FC4D6, transparent: true, opacity: 0.32 }));
+    scene.add(rain);
+
+    ready = true;
+  }
+
+  function buildStreet(id) {
+    // clear previous street furniture
+    scene.children.filter(o => o.userData.street).forEach(o => {
+      scene.remove(o);
+      o.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+    });
+
+    const rnd = seeded(id);
+    const group = new THREE.Group();
+    group.userData.street = true;
+
+    for (let side = -1; side <= 1; side += 2) {
+      let z = 6;
+      for (let i = 0; i < 13; i++) {
+        // Real streets are not a row of identical boxes. Widths, depths, heights
+        // and setbacks all vary, and every fourth plot is a low-rise so the
+        // skyline has rhythm rather than a flat ceiling.
+        const lowRise = (i % 4 === 3);
+        const w = lowRise ? 5.5 + rnd() * 4.5 : 3 + rnd() * 8;
+        const d = 4.5 + rnd() * 7;
+        const h = lowRise ? 3 + rnd() * 4.5 : 7 + rnd() * 31;
+        const setback = rnd() * 1.6;
+
+        // Cool slate, lightened with height so taller blocks catch more sky.
+        const t = Math.min(1, h / 28);
+        const col = new THREE.Color(0x4A6274).lerp(new THREE.Color(0x8AA6C2), t * 0.8 + rnd() * 0.2);
+        const b = new THREE.Mesh(
+          new THREE.BoxGeometry(w, h, d),
+          new THREE.MeshStandardMaterial({ color: col, roughness: 0.82, flatShading: true }));
+        b.position.set(side * (7 + setback + w / 2), h / 2, z - d / 2);
+        group.add(b);
+
+        // A darker plinth grounds the block instead of it floating on the water
+        const plinth = new THREE.Mesh(
+          new THREE.BoxGeometry(w + 0.5, 1.1, d + 0.5),
+          new THREE.MeshStandardMaterial({ color: 0x1C2833, roughness: 0.95 }));
+        plinth.position.set(b.position.x, 0.55, b.position.z);
+        group.add(plinth);
+
+        // Warm lit windows — the only warm accent up there, so they read as
+        // occupancy rather than decoration.
+        if (!lowRise && rnd() > 0.32) {
+          const rows = 2 + Math.floor(rnd() * 3);
+          for (let r = 0; r < rows; r++) {
+            const lit = new THREE.Mesh(
+              new THREE.PlaneGeometry(w * (0.42 + rnd() * 0.3), 0.5),
+              new THREE.MeshBasicMaterial({ color: 0xFFC93C, transparent: true,
+                                            opacity: 0.22 + rnd() * 0.34 }));
+            lit.position.set(side * (7 + setback + 0.02), 3 + r * (h / (rows + 1.1)) + 1.4, z - d / 2);
+            lit.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+            group.add(lit);
+          }
+        }
+        z -= d + 1.2 + rnd() * 2.6;
+      }
+    }
+
+    // Lampposts: on the kerb line (x = ±5.75), alternating sides so they read
+    // as street furniture rather than a corridor. The warm sphere is the lamp
+    // itself — previously these floated with no relationship to the kerb, which
+    // is what made the yellow look like a stray artefact.
+    for (let i = 0; i < 7; i++) {
+      const side = i % 2 === 0 ? -1 : 1;
+      const zz = 3 - i * 11;
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.07, 0.11, 4.6, 8),
+        new THREE.MeshStandardMaterial({ color: 0x2A2E33, roughness: 0.7, metalness: 0.3 }));
+      post.position.set(side * 5.75, 2.3, zz);
+      group.add(post);
+
+      const arm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.05, 0.9, 6),
+        new THREE.MeshStandardMaterial({ color: 0x2A2E33, roughness: 0.7 }));
+      arm.rotation.z = Math.PI / 2;
+      arm.position.set(side * 5.3, 4.55, zz);
+      group.add(arm);
+
+      const lamp = new THREE.Mesh(
+        new THREE.SphereGeometry(0.17, 12, 10),
+        new THREE.MeshBasicMaterial({ color: 0xFFD98A }));
+      lamp.position.set(side * 4.9, 4.5, zz);
+      group.add(lamp);
+
+      const glow = new THREE.PointLight(0xFFC46B, 0.55, 13);
+      glow.position.set(side * 4.9, 4.4, zz);
+      group.add(glow);
+    }
+
+    /* HUMAN FIGURE — the scale reference the entire scene exists for, so it
+       gets the most care. Violet and emissive: doctrinally it is the person the
+       dispatcher is protecting (human, not model output), and practically it is
+       the only thing guaranteed to separate from every other surface.
+
+       Proportions are ~7.5 heads, which is what makes a stick of primitives
+       read as a person rather than a snowman. 1.72 m total.
+       r128 has no CapsuleGeometry — cylinders and spheres only. */
+    const HEAD_R = 0.115;
+    const violet   = new THREE.MeshStandardMaterial({
+      color: 0xC77DFF, emissive: 0x4A1F78, emissiveIntensity: 0.35, roughness: 0.6 });
+    const violetLt = new THREE.MeshStandardMaterial({
+      color: 0xE0BBFF, emissive: 0x5A2A90, emissiveIntensity: 0.3, roughness: 0.6 });
+
+    const fig = new THREE.Group();
+    const limb = (rTop, rBot, len, mat) =>
+      new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, len, 12), mat);
+
+    // legs, slightly apart and tapered ankle-ward
+    for (const dx of [-0.095, 0.095]) {
+      const leg = limb(0.082, 0.055, 0.84, violet);
+      leg.position.set(dx, 0.42, 0);
+      fig.add(leg);
+      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.062, 10, 8), violet);
+      foot.scale.set(1, 0.6, 1.5); foot.position.set(dx, 0.05, 0.045);
+      fig.add(foot);
+    }
+    // hips -> chest, tapered so the silhouette has a waist
+    const torso = limb(0.135, 0.10, 0.60, violet);
+    torso.position.y = 1.14; fig.add(torso);
+    // shoulders as a spanning bar, which is what reads as "person" at distance
+    const shoulders = limb(0.058, 0.058, 0.34, violet);
+    shoulders.rotation.z = Math.PI / 2; shoulders.position.y = 1.42; fig.add(shoulders);
+    // arms hanging with a slight outward angle
+    for (const dx of [-0.225, 0.225]) {
+      const arm = limb(0.05, 0.038, 0.62, violet);
+      arm.position.set(dx, 1.11, 0.01);
+      arm.rotation.z = dx < 0 ? 0.16 : -0.16;
+      fig.add(arm);
+    }
+    // neck + head, lighter so the face-end is the brightest point
+    const neck = limb(0.045, 0.045, 0.10, violet);
+    neck.position.y = 1.545; fig.add(neck);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(HEAD_R, 18, 14), violetLt);
+    head.scale.set(0.9, 1.08, 0.94); head.position.y = 1.665; fig.add(head);
+
+    // Its own light, so it never disappears into fog or a dark facade
+    const figLight = new THREE.PointLight(0xB26BFF, 0.5, 7);
+    figLight.position.set(0, 1.2, 0.6); fig.add(figLight);
+
+    // Close to camera (z=15) and off the centre line so the water reads past it
+    fig.position.set(2.15, 0, 8.1);
+    fig.rotation.y = -0.32;
+    group.add(fig);
+
+    scene.add(group);
+  }
+
+  function resize() {
+    const w = window.innerWidth, h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+
+  function frame(now) {
+    const el = (now - t0) / 1000;
+
+    // Water is already at depth on arrival; the camera does the easing instead.
+    water.position.y = curDepth;
+    if (camIn < 1) {
+      camIn = Math.min(1, camIn + 1 / 37);        // ~620ms at 60fps
+      const e = 1 - Math.pow(1 - camIn, 3);       // strong ease-out
+      camera.position.z = 22 - 7 * e;             // 22 -> 15
+      camera.position.y = 2.9 - 1.15 * e;         // 2.9 -> 1.75
+      camera.fov = 62 - 10 * e;                   // 62 -> 52
+      camera.updateProjectionMatrix();
+    }
+
+    // ripple
+    const pos = waterGeo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i);
+      pos.setZ(i, Math.sin(x * 0.35 + el * 1.4) * 0.018 + Math.cos(y * 0.28 - el * 1.1) * 0.014);
+    }
+    pos.needsUpdate = true;
+    waterGeo.computeVertexNormals();
+
+    // Rain DENSITY tracks the rainfall control, not just velocity. Drawing
+    // all 1500 segments at the Dry preset produced a rainstorm over 0 cm of
+    // water, which contradicted both the label and DIRECTION.md §2.5.
+    const drops = Math.round((state.rainfall / 120) * 1500);
+    rain.visible = drops > 0;
+    rain.geometry.setDrawRange(0, drops * 2);
+
+    const rp = rain.geometry.attributes.position;
+    const fall = 0.42 + state.rainfall * 0.006;
+    for (let i = 0; i < rp.count; i += 2) {
+      let y1 = rp.getY(i) - fall, y2 = rp.getY(i + 1) - fall;
+      if (y2 < curDepth) { const top = 30 + Math.random() * 6; y1 = top; y2 = top - 0.42; }
+      rp.setY(i, y1); rp.setY(i + 1, y2);
+    }
+    rp.needsUpdate = true;
+
+    // slow camera drift so the scene feels alive without moving the read
+    camera.position.x = Math.sin(el * 0.16) * 0.85 * camIn;
+    camera.lookAt(0, 1.1, -10);
+
+    renderer.render(scene, camera);
+    raf = requestAnimationFrame(frame);
+  }
+
+  function open(id) {
+    const z = state.data && state.data.zones.find(x => x.id === id);
+    const seed = ZONES.find(s => s.id === id);
+    if (!z || !seed) return;
+
+    const modal = document.getElementById('diorama');
+    lastFocus = document.activeElement;
+    zoneId = id;
+
+    // Any failure below — three.js missing, WebGL unavailable or blocked,
+    // a driver refusing a context — must produce a VISIBLE state. Before
+    // this guard existed, a throw inside init() killed the click handler and
+    // the modal never opened at all: a dead click with no explanation.
+    const fail = msg => {
+      modal.hidden = false;
+      const old = modal.querySelector('.dio-fallback');
+      if (old) old.remove();                     // never stack on reopen
+      modal.insertAdjacentHTML('beforeend', `<p class="dio-fallback">${msg}</p>`);
+      document.getElementById('dio-name').textContent = z.name;
+      document.getElementById('dio-name-ml').textContent = seed.ml;
+      document.getElementById('dio-depth').innerHTML =
+        Math.round(z.depthCm) + '<small> cm</small>';
+      setBackgroundInert(true);
+      document.getElementById('dio-close').focus();
+      announce(`Street level view unavailable. ${z.name}, ${Math.round(z.depthCm)} centimetres.`);
+    };
+
+    if (!window.THREE) {
+      fail('The 3D view could not load — <code>vendor/three.r128.min.js</code> is missing. The depth figure above is unaffected, and so is the rest of the console.');
+      return;
+    }
+    try {
+      if (!ready) init();
+      buildStreet(id);
+    } catch (err) {
+      console.error('[diorama]', err);
+      fail('This device could not open a 3D view (WebGL is unavailable or blocked). The depth figure above is unaffected, and so is the rest of the console.');
+      return;
+    }
+    const stale = modal.querySelector('.dio-fallback');
+    if (stale) stale.remove();
+
+    const L2 = LEVELS[z.level];
+    targetDepth = z.depthCm / 100;
+    curDepth = 0;
+    // Water reads as water first, warning second: a deep blue base pulled only
+    // 35% toward the level colour. A fully level-coloured plane rendered as a
+    // flat red floor, which looked like lava, not flood water.
+    water.material.color.set(0x1E5C7A).lerp(new THREE.Color(L2.color), 0.16);
+    // The warning reads in the AIR, not the water: tinting the fog keeps the
+    // water looking like water while the whole scene still carries the level.
+    scene.fog.color.set(0x131C33).lerp(new THREE.Color(L2.color), 0.14);
+    scene.background.set(0x131C33).lerp(new THREE.Color(L2.color), 0.10);
+
+    document.getElementById('dio-name').textContent = z.name;
+    document.getElementById('dio-name-ml').textContent = seed.ml;
+    const lv = document.getElementById('dio-level');
+    lv.textContent = L2.imd + ': ' + L2.what;
+    lv.style.color = L2.color;
+
+    const off = Math.round(state.horizon);
+    document.getElementById('dio-meta').innerHTML =
+      `predicted standing water<br>at <strong>${off === 0 ? 'now' : '+' + off + ' min'}</strong>` +
+      ` · <strong>${state.rainfall} mm/hr</strong><br>` +
+      `figure shown is <strong>1.72 m</strong> tall`;
+
+    /* TRANSITION — map dive, blackout, arrival.
+       1. map scales toward the zone + veil fades up      (400ms, ease-out)
+       2. at full black the diorama is swapped in         (cut, invisible)
+       3. diorama fades up with the camera easing forward (320ms + 620ms)
+       Total ~1020ms, inside the 1200ms ceiling. */
+    const veil = document.getElementById('veil');
+    const instant = REDUCE.matches;
+
+    // Water starts AT the correct depth — the rise already happened while the
+    // camera was travelling, so arrival shows the answer, not a filling tank.
+    curDepth = targetDepth;
+    water.position.y = curDepth;
+    document.getElementById('dio-depth').innerHTML =
+      Math.round(z.depthCm) + '<small> cm</small>';
+
+    const arrive = () => {
+      modal.hidden = false;
+      modal.dataset.enter = 'true';
+      resize();
+      setBackgroundInert(true);
+      document.getElementById('dio-close').focus();
+      t0 = performance.now();
+      camIn = instant ? 1 : 0;                 // camera eases forward on arrival
+      requestAnimationFrame(() => {
+        modal.dataset.enter = 'false';
+        veil.dataset.on = 'false';
+        // diving stays TRUE while the diorama is open. Releasing it here meant
+        // the map quietly zoomed back out behind the modal, so on close there
+        // was nothing left to reverse and the return was a bare fade.
+      });
+      if (instant) { renderer.render(scene, camera); }
+      else { raf = requestAnimationFrame(frame); }
+      announce(`Street level view of ${z.name}. ${Math.round(z.depthCm)} centimetres of water.`);
+    };
+
+    if (instant) { arrive(); return; }
+
+    // Push the map toward the zone so the dive has a destination
+    if (mapOK) { try { map.setView([seed.lat, seed.lng], Math.max(map.getZoom(), 14), { animate: true, duration: 0.42 }); } catch (e) {} }
+    document.body.dataset.diving = 'true';
+    veil.dataset.on = 'true';
+    setTimeout(arrive, 400);
+  }
+
+  /* The dialog declares aria-modal="true"; that is a promise to assistive tech
+     that the rest of the page is unreachable, and it has to be kept. `inert`
+     is the right primitive — it removes focus, pointer events and the a11y
+     tree in one. The Tab guard below covers engines that lack it, so the
+     promise holds either way. */
+  function setBackgroundInert(on) {
+    ['map', 'map-notice'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.inert = on;
+    });
+    document.querySelectorAll('.hud, .map-grade').forEach(el => { el.inert = on; });
+  }
+
+  function trapTab(e) {
+    if (e.key !== 'Tab') return;
+    const modal = document.getElementById('diorama');
+    if (modal.hidden) return;
+    const f = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (!f.length) { e.preventDefault(); return; }
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+  document.addEventListener('keydown', trapTab, true);
+
+  /* Exit is faster than entry — Emil's rule. 260ms fade out, 240ms back,
+     ~500ms total against ~1020ms in. */
+  function close() {
+    const modal = document.getElementById('diorama');
+    const veil = document.getElementById('veil');
+    if (modal.hidden) return;
+
+    if (REDUCE.matches) {
+      if (raf) { cancelAnimationFrame(raf); raf = null; }
+      modal.hidden = true; veil.dataset.on = 'false';
+      document.body.dataset.diving = 'false';
+      setBackgroundInert(false);
+      if (lastFocus && lastFocus.focus) lastFocus.focus();
+      zoneId = null; return;
+    }
+
+    veil.dataset.on = 'true';
+    modal.dataset.enter = 'true';
+    setTimeout(() => {
+      if (raf) { cancelAnimationFrame(raf); raf = null; }
+      modal.hidden = true;
+      setBackgroundInert(false);
+      // Reverse the entry: release the dive and lift the veil together, so the
+      // map zooms back out from 1.35 as it reappears.
+      document.body.dataset.diving = 'false';
+      requestAnimationFrame(() => { veil.dataset.on = 'false'; });
+      if (lastFocus && lastFocus.focus) lastFocus.focus();
+      zoneId = null;
+    }, 240);
+  }
+
+  window.addEventListener('resize', () => { if (ready && !document.getElementById('diorama').hidden) resize(); });
+
+  return { open, close, isOpen: () => !document.getElementById('diorama').hidden };
+})();
+
+/* ==================================================================
+   WIRE UP
+   ================================================================== */
+buildStaticUI();
+buildZoneRows();
+syncRainReadout();
+updateRunButton();
+wireDisclosure('legend-btn', 'legend-body');
+wireDisclosure('prov-btn', 'prov-body');
+
+/* The slider fires many input events per drag. Reading it straight through to
+   render() rebuilt all five contract frames on every one. Coalescing to one
+   repaint per animation frame keeps the drag at pointer speed. */
+let rainRAF = null;
+document.getElementById('rain').addEventListener('input', e => {
+  state.rainfall = Number(e.target.value);
+  syncRainReadout();          // readout updates instantly — that must not wait
+  hideSweepCta();
+  if (rainRAF) return;
+  rainRAF = requestAnimationFrame(() => { rainRAF = null; render(); });
+});
+
+document.getElementById('scrub').addEventListener('input', e => {
+  // Taking the scrubber cancels the sweep from wherever it is, rather than
+  // fighting it. The CSS transitions pick the motion back up.
+  stopSweep();
+  hideSweepCta();
+  setHorizon(OFFSETS[Number(e.target.value)]);
+});
+
+document.getElementById('btn-run').addEventListener('click', startSweep);
+document.getElementById('btn-report').addEventListener('click', () => setReportMode(!state.reportMode));
+document.getElementById('btn-report-hero').addEventListener('click', () => setReportMode(!state.reportMode));
+window.addEventListener('online',  () => paintOffline());
+window.addEventListener('offline', () => paintOffline());
+document.getElementById('btn-report-zone').addEventListener('click', () => {
+  const z = ZONES.find(x => x.id === state.selectedZone);
+  if (z) addReport(z.lat, z.lng, z.name);
+});
+document.getElementById('btn-clear-reports').addEventListener('click', clearReports);
+
+// Popup buttons live in Leaflet-managed DOM, so delegate.
+document.addEventListener('click', e => {
+  const btn = e.target.closest && e.target.closest('[data-diorama]');
+  if (btn) Diorama.open(btn.dataset.diorama);
+});
+document.getElementById('dio-close').addEventListener('click', () => Diorama.close());
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (Diorama.isOpen()) { Diorama.close(); return; }
+  if (state.reportMode) setReportMode(false);
+});
+
+render();
+</script>
+</body>
+</html>

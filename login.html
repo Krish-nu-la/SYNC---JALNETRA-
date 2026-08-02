@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JalNetra — Sign in</title>
+<meta name="description" content="Demo access gate for the JalNetra flood nowcast console.">
+<link rel="stylesheet" href="vendor/fonts.css">
+<link rel="stylesheet" href="vendor/tokens.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--ink); color: var(--text);
+               font-family: var(--ff-ui); font-size: 14px; -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer;
+           transition: transform 140ms var(--ease-out); }
+  button:active { transform: scale(0.97); }
+
+  /* Split: the left half carries the product's argument, the right half the
+     gate. Not a centred card on a gradient — this is the console's sibling. */
+  .wrap { display: grid; grid-template-columns: 1.15fr 1fr; min-height: 100dvh; }
+
+  .pitch {
+    position: relative; overflow: hidden;
+    padding: 52px 56px; display: flex; flex-direction: column;
+    border-right: 1px solid var(--hairline);
+  }
+  /* Rain field. Decorative, non-interactive, respects reduced motion. */
+  .rain { position: absolute; inset: 0; pointer-events: none; opacity: .5; }
+  .rain span {
+    position: absolute; top: -12%; width: 1px; height: 78px;
+    background: linear-gradient(to bottom, transparent, var(--canal));
+    animation: fall linear infinite;
+  }
+  @keyframes fall { to { transform: translateY(125vh); } }
+
+  .wordmark { font-family: var(--ff-display); font-weight: 900; font-size: 34px;
+              letter-spacing: -0.02em; margin: 0; position: relative; }
+  .wordmark span { color: var(--safe); }
+  .tagline { position: relative; margin: 10px 0 0; color: var(--muted); font-size: 13px; letter-spacing: .04em; }
+
+  .claim {
+    position: relative; margin: auto 0 0;
+    font-family: var(--ff-display); font-weight: 800;
+    font-size: clamp(28px, 3.6vw, 46px); line-height: 1.04; letter-spacing: -0.035em;
+    max-width: 15ch;
+  }
+  .claim em { font-style: normal; color: var(--safe); }
+  .claim-sub { position: relative; margin: 18px 0 0; color: var(--muted); font-size: 13px;
+               line-height: 1.65; max-width: 46ch; }
+
+  .ladder { position: relative; display: flex; gap: 0; margin: 30px 0 0; max-width: 420px; }
+  .rung { flex: 1; }
+  .rung i { display: block; height: 5px; }
+  .rung b { display: block; font-size: 9px; letter-spacing: .13em; text-transform: uppercase;
+            font-weight: 700; margin-top: 8px; }
+  .rung s { display: block; text-decoration: none; font-size: 10px; color: var(--muted);
+            font-family: var(--ff-mono); margin-top: 2px; }
+
+  .gate { display: flex; flex-direction: column; justify-content: center; padding: 52px 56px; }
+  .gate h2 { font-family: var(--ff-display); font-weight: 800; font-size: 21px;
+             letter-spacing: -0.02em; margin: 0 0 6px; }
+  .gate p.lede { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0 0 26px; }
+
+  label { display: block; font-size: 9px; letter-spacing: .15em; text-transform: uppercase;
+          color: var(--muted); font-weight: 700; margin-bottom: 7px; }
+  input {
+    width: 100%; padding: 12px 13px; margin-bottom: 18px;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--hairline); border-radius: 2px;
+    font: inherit; font-size: 14px;
+    transition: border-color .16s var(--ease-out);
+  }
+  input:focus { border-color: var(--hairline-2); outline-offset: 0; }
+  input::placeholder { color: #5D6E7C; }
+
+  .role { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 22px; }
+  .role button {
+    padding: 11px 8px; border: 1px solid var(--hairline); border-radius: 2px;
+    font-size: 11px; color: var(--muted);
+    transition: color .16s var(--ease-out), border-color .16s var(--ease-out), background .16s var(--ease-out);
+  }
+  .role button[aria-pressed="true"] { background: var(--text); color: var(--ink);
+                                      border-color: var(--text); font-weight: 600; }
+
+  .submit {
+    width: 100%; padding: 14px; background: var(--safe); color: var(--ink);
+    border-radius: 2px; font-family: var(--ff-display); font-weight: 800;
+    font-size: 12px; letter-spacing: .11em; text-transform: uppercase;
+    transition: filter .16s var(--ease-out), transform 140ms var(--ease-out);
+  }
+  .submit:hover { filter: brightness(1.12); }
+
+  .demo-note {
+    margin-top: 22px; padding: 12px 14px;
+    border: 1px solid var(--watch); border-radius: 2px;
+    font-size: 11px; line-height: 1.6; color: var(--muted);
+  }
+  .demo-note strong { color: var(--watch); display: block; font-size: 9px;
+                      letter-spacing: .14em; text-transform: uppercase; margin-bottom: 5px; }
+
+  .skip { display: block; margin-top: 16px; font-size: 11px; color: var(--muted);
+          text-align: center; text-decoration: underline; text-underline-offset: 3px; width: 100%; }
+  .skip:hover { color: var(--text); }
+
+  @media (max-width: 860px) {
+    .wrap { grid-template-columns: 1fr; }
+    .pitch { border-right: none; border-bottom: 1px solid var(--hairline); padding: 34px 24px; }
+    .gate { padding: 34px 24px; }
+    .claim { margin-top: 26px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rain { display: none; }
+    *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+</style>
+</head>
+
+<body>
+<div class="wrap">
+
+  <section class="pitch">
+    <div class="rain" id="rain" aria-hidden="true"></div>
+
+    <h1 class="wordmark">JAL<span>NETRA</span></h1>
+    <p class="tagline">Kochi street-level flood nowcast</p>
+
+    <p class="claim">Two hours of <em>warning</em>, one street at a time.</p>
+    <p class="claim-sub">
+      India's Meteorological Department issues flood warnings by district.
+      JalNetra issues them by street, for the next 120 minutes — and puts a
+      human in the loop before anyone acts on them.
+    </p>
+
+    <div class="ladder" aria-hidden="true">
+      <div class="rung"><i style="background:var(--safe)"></i><b style="color:var(--safe)">No warning</b><s>&lt;10 cm</s></div>
+      <div class="rung"><i style="background:var(--watch)"></i><b style="color:var(--watch)">Watch</b><s>10–24</s></div>
+      <div class="rung"><i style="background:var(--alert)"></i><b style="color:var(--alert)">Alert</b><s>25–49</s></div>
+      <div class="rung"><i style="background:var(--warning)"></i><b style="color:var(--warning)">Warning</b><s>50 cm+</s></div>
+    </div>
+  </section>
+
+  <section class="gate">
+    <h2>Sign in to the console</h2>
+    <p class="lede">Kochi Corporation flood operations.</p>
+
+    <form id="form" novalidate>
+      <label for="operator">Operator ID</label>
+      <input id="operator" name="operator" type="text" placeholder="e.g. KOC-4471" autocomplete="username">
+
+      <label for="pass">Passphrase</label>
+      <input id="pass" name="pass" type="password" placeholder="••••••••" autocomplete="current-password">
+
+      <label id="role-label">Role</label>
+      <div class="role" role="group" aria-labelledby="role-label">
+        <button type="button" data-role="dispatcher" aria-pressed="true">Dispatcher</button>
+        <button type="button" data-role="observer" aria-pressed="false">Field observer</button>
+      </div>
+
+      <button class="submit" type="submit">Enter console</button>
+    </form>
+
+    <p class="demo-note">
+      <strong>Demo build</strong>
+      This gate performs no authentication. Any input — including none — opens the
+      console. There is no account system, no server, and nothing is transmitted
+      or stored. It exists to frame the console as an operational tool.
+    </p>
+
+    <button class="skip" id="skip">Skip straight to the console →</button>
+  </section>
+
+</div>
+
+<script>
+  // decorative rain
+  const rain = document.getElementById('rain');
+  for (let i = 0; i < 46; i++) {
+    const s = document.createElement('span');
+    s.style.left = (Math.random() * 100) + '%';
+    s.style.animationDuration = (0.75 + Math.random() * 0.9) + 's';
+    s.style.animationDelay = (-Math.random() * 2) + 's';
+    s.style.opacity = 0.2 + Math.random() * 0.5;
+    rain.appendChild(s);
+  }
+
+  document.querySelectorAll('.role button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.role button').forEach(o =>
+        o.setAttribute('aria-pressed', String(o === b)));
+    });
+  });
+
+  // No authentication. Anything passes — this is a demo gate, and the note on
+  // screen says so rather than implying a login that does not exist.
+  function enter() { window.location.href = 'index.html'; }
+  document.getElementById('form').addEventListener('submit', e => { e.preventDefault(); enter(); });
+  document.getElementById('skip').addEventListener('click', enter);
+</script>
+</body>
+</html>
