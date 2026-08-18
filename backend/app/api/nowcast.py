@@ -1,12 +1,19 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
+from app.database.database import get_db
 from app.services.prediction_service import prediction_service
+
 
 router = APIRouter()
 
 
 @router.get("/nowcast")
-def get_nowcast(rain: float, offset: int):
+def get_nowcast(
+    rain: float,
+    offset: int,
+    db: Session = Depends(get_db)
+):
 
     if rain < 0 or rain > 120:
         raise HTTPException(
@@ -22,5 +29,6 @@ def get_nowcast(rain: float, offset: int):
 
     return prediction_service.predict(
         rainfall=rain,
-        offset=offset
+        offset=offset,
+        db=db
     )

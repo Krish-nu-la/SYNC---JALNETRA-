@@ -1,48 +1,106 @@
-from app.services.forecast_service import forecast_service
-
-
 class AlertService:
 
-    def generate(self, rainfall):
+    def evaluate(
+        self,
+        depth_cm: float,
+        risk: float,
+        level: str,
+        trend: str,
+        recent_reports: int = 0,
+        blocked_roads: int = 0,
+    ):
 
-        forecast = forecast_service.generate(rainfall)
+        reasons = []
 
-        latest = forecast["frames"][-1]
+        # AI risk
+        if level == "severe":
 
-        alerts = []
+            alert = "severe"
 
-        for zone in latest["zones"]:
+            reasons.append(
+                "Predicted water depth is in the severe range."
+            )
 
-            if zone["level"] == "safe":
-                continue
+        elif level == "high":
 
-            alerts.append({
+            alert = "high"
 
-                "zone": zone["name"],
+            reasons.append(
+                "Predicted waterlogging is high."
+            )
 
-                "level": zone["level"],
+        elif level == "watch":
 
-                "depthCm": zone["depthCm"],
+            alert = "watch"
 
-                "trend": zone["trend"],
+            reasons.append(
+                "Surface water is expected."
+            )
 
-                "population": zone["population"],
+        else:
 
-                "message":
+            alert = "safe"
 
-                    f"{zone['depthCm']} cm water expected."
+        # Rising water
+        if trend == "rising":
 
-            })
+            reasons.append(
+                "Recent citizen reports indicate rising water levels."
+            )
 
-        alerts.sort(
+            if alert == "safe":
+                alert = "watch"
 
-            key=lambda x: x["depthCm"],
+            elif alert == "watch":
+                alert = "high"
 
-            reverse=True
+        # Multiple recent reports
+        if recent_reports >= 3:
 
-        )
+            reasons.append(
+                f"{recent_reports} recent citizen reports were received."
+            )
 
-        return alerts
+            if alert == "safe":
+                alert = "watch"
+
+        # Road blockage
+        if blocked_roads > 0:
+
+            reasons.append(
+                f"{blocked_roads} recent report(s) indicate road blockage."
+            )
+
+            if alert in ["safe", "watch"]:
+                alert = "high"
+
+        recommendations = {
+
+            "safe":
+                "No significant flooding expected. Normal travel is advised.",
+
+            "watch":
+                "Monitor conditions and avoid unnecessary travel through low-lying roads.",
+
+            "high":
+                "Avoid waterlogged routes and consider alternative roads.",
+
+            "severe":
+                "Avoid travel through the affected zone and move to safer ground if necessary."
+        }
+
+        return {
+
+            "alertLevel": alert,
+
+            "triggered": alert != "safe",
+
+            "reasons": reasons,
+
+            "recommendation":
+                recommendations[alert]
+
+        }
 
 
 alert_service = AlertService()

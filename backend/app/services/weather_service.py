@@ -2,6 +2,7 @@ import requests
 
 from app.core.config import settings
 from app.services.hydrology_inputs import hydrology_input_service
+from app.services.cache_service import cache_service
 
 
 class WeatherService:
@@ -26,7 +27,6 @@ class WeatherService:
             TypeError,
             ValueError,
         ):
-            # Keep the prediction API usable if the external weather provider is down.
             return self._slider_weather(rainfall_override)
 
     @staticmethod
@@ -47,35 +47,58 @@ class WeatherService:
         }
 
     def get_openmeteo(self, offset=0, rainfall_override=None):
-        # Open-Meteo hourly data gives us a genuinely different weather input
-        # for each 30-minute forecast frame instead of ignoring `offset`.
-        url = settings.OPENMETEO_URL
-        horizon_hours = max(2, (offset // 60) + 2)
 
-        params = {
-            "latitude": settings.WEATHER_LATITUDE,
-            "longitude": settings.WEATHER_LONGITUDE,
-            "forecast_days": 2,
-            "hourly": [
-                "temperature_2m",
-                "relative_humidity_2m",
-                "precipitation",
-            ],
-            "forecast_hours": horizon_hours,
-        }
+        # -------------------------------------------------
+        # CACHE THE OPEN-METEO HOURLY FORECAST
+        # -------------------------------------------------
+        cache_key = "openmeteo:hourly"
 
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
+        hourly = cache_service.get(cache_key)
 
-        hourly = response.json()["hourly"]
+        if hourly is None:
 
-        # A 30-minute frame maps to the nearest available hourly forecast.
+            url = settings.OPENMETEO_URL
+
+            params = {
+                "latitude": settings.WEATHER_LATITUDE,
+                "longitude": settings.WEATHER_LONGITUDE,
+                "forecast_days": 2,
+                "hourly": [
+                    "temperature_2m",
+                    "relative_humidity_2m",
+                    "precipitation",
+                ],
+                "forecast_hours": 6,
+            }
+
+            response = requests.get(
+                url,
+                params=params,
+                timeout=10,
+            )
+
+            response.raise_for_status()
+
+            hourly = response.json()["hourly"]
+
+            # Cache the forecast for 5 minutes.
+            cache_service.set(
+                cache_key,
+                hourly,
+            )
+
+        # -------------------------------------------------
+        # SELECT FORECAST FRAME
+        # -------------------------------------------------
+
         index = min(
             max(int(round(offset / 60)), 0),
             len(hourly["temperature_2m"]) - 1,
         )
 
-        forecast_rain = float(hourly["precipitation"][index] or 0)
+        forecast_rain = float(
+            hourly["precipitation"][index] or 0
+        )
 
         rainfall = (
             float(rainfall_override)
@@ -83,10 +106,21 @@ class WeatherService:
             else forecast_rain
         )
 
-        temperature = float(hourly["temperature_2m"][index])
-        humidity = float(hourly["relative_humidity_2m"][index])
+        temperature = float(
+            hourly["temperature_2m"][index]
+        )
 
-        hydrology = hydrology_input_service.from_scenario(rainfall)
+        humidity = float(
+            hourly["relative_humidity_2m"][index]
+        )
+
+        # -------------------------------------------------
+        # HYDROLOGY
+        # -------------------------------------------------
+
+        hydrology = hydrology_input_service.from_scenario(
+            rainfall
+        )
 
         return {
             "rainfall_mm": rainfall,
