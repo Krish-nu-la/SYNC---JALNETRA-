@@ -1,4 +1,3 @@
-import json
 import sys
 import time
 
@@ -40,6 +39,10 @@ def main():
     print("       JALNETRA BACKEND VERIFICATION")
     print("=" * 55)
 
+    # --------------------------------------------------
+    # HEALTH
+    # --------------------------------------------------
+
     health = check("Health", path="/health")
 
     if not health:
@@ -50,6 +53,10 @@ def main():
         print("\n❌ Health endpoint is not healthy.")
         sys.exit(1)
 
+    # --------------------------------------------------
+    # NOWCAST
+    # --------------------------------------------------
+
     offsets = [0, 30, 60, 90, 120]
     predictions = {}
 
@@ -57,13 +64,20 @@ def main():
         result = check(
             f"Nowcast {offset:>3} min",
             path="/nowcast",
-            params={"rain": 50, "offset": offset},
+            params={
+                "rain": 50,
+                "offset": offset,
+            },
         )
 
         if not result:
             sys.exit(1)
 
         predictions[offset] = result
+
+    # --------------------------------------------------
+    # OFFSET VALIDATION
+    # --------------------------------------------------
 
     print("\n" + "-" * 55)
     print("OFFSET VALIDATION")
@@ -75,7 +89,11 @@ def main():
         zones = predictions[offset].get("zones", [])
 
         kaloor = next(
-            (z for z in zones if z.get("id") == "kaloor"),
+            (
+                zone
+                for zone in zones
+                if zone.get("id") == "kaloor"
+            ),
             None,
         )
 
@@ -86,13 +104,20 @@ def main():
         depth = float(kaloor["depthCm"])
         kaloor_depths.append(depth)
 
-        print(f"{offset:>3} min → Kaloor: {depth:.2f} cm")
+        print(
+            f"{offset:>3} min → "
+            f"Kaloor: {depth:.2f} cm"
+        )
 
     if len(set(kaloor_depths)) == 1:
         print("\n❌ Offset has NO effect on prediction.")
         sys.exit(1)
 
     print("\n✅ Offset changes prediction.")
+
+    # --------------------------------------------------
+    # ZONE VALIDATION
+    # --------------------------------------------------
 
     print("\n" + "-" * 55)
     print("ZONE VALIDATION")
@@ -104,7 +129,66 @@ def main():
         print("❌ Fewer than 3 zones returned.")
         sys.exit(1)
 
-    print(f"✅ Zones returned: {len(zones)}")
+    depths = []
+
+    for zone in zones:
+        depth = float(zone["depthCm"])
+        risk = float(zone["risk"])
+
+        if depth < 0:
+            print(
+                f"❌ Negative depth: "
+                f"{zone['name']}"
+            )
+            sys.exit(1)
+
+        if not 0 <= risk <= 1:
+            print(
+                f"❌ Invalid risk for "
+                f"{zone['name']}: {risk}"
+            )
+            sys.exit(1)
+
+        depths.append(depth)
+
+        print(
+            f"{zone['name']:<20} "
+            f"{depth:>7.2f} cm | "
+            f"risk={risk:.3f} | "
+            f"{zone['level']}"
+        )
+
+    # --------------------------------------------------
+    # SPATIAL VARIATION
+    # --------------------------------------------------
+
+    depth_range = max(depths) - min(depths)
+
+    print(f"\nZones returned: {len(zones)}")
+    print(
+        f"Minimum depth: "
+        f"{min(depths):.2f} cm"
+    )
+    print(
+        f"Maximum depth: "
+        f"{max(depths):.2f} cm"
+    )
+    print(
+        f"Spatial depth range: "
+        f"{depth_range:.2f} cm"
+    )
+
+    if depth_range < 0.10:
+        print(
+            "\n⚠️ WARNING: Predictions are "
+            "nearly identical across zones."
+        )
+    else:
+        print("\n✅ Spatial variation detected.")
+
+    # --------------------------------------------------
+    # FINAL RESULT
+    # --------------------------------------------------
 
     print("\n" + "-" * 55)
     print("RESULT")

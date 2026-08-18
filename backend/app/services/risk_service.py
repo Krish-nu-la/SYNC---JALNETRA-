@@ -2,6 +2,8 @@ from app.core.constants import (
     SAFE_LIMIT,
     WATCH_LIMIT,
     HIGH_LIMIT,
+    MAX_DEPTH,
+    MAX_RISK,
 )
 
 
@@ -9,7 +11,7 @@ class RiskService:
 
     def calculate(self, depth_cm: float):
 
-        risk = min(1.0, depth_cm / 75)
+        risk = min(MAX_RISK, max(0.0, depth_cm / MAX_DEPTH))
 
         if depth_cm < SAFE_LIMIT:
 
