@@ -1,0 +1,570 @@
+{
+  "status": "live",
+  "syncType": "emergency",
+  "generatedAt": "2026-08-18T23:29:20.601216+00:00",
+  "nextSyncAt": "2026-08-18T23:59:20.601216+00:00",
+  "expiresAt": "2026-08-19T01:29:20.601216+00:00",
+  "processingTimeMs": 31.33,
+  "forecasts": [
+    {
+      "offsetMin": 0,
+      "weather": {
+        "rainfall_mm": 1.0,
+        "temperature_c": 24.4,
+        "humidity_percent": 96.0,
+        "river_discharge_m\u00b3_s": 2.0,
+        "water_level_m": 0.01,
+        "historical_floods": 4.0,
+        "infrastructure": 7.0,
+        "source": "open-meteo",
+        "hydrology_source": "scenario-proxy"
+      },
+      "zones": [
+        {
+          "id": "kaloor",
+          "name": "Kaloor",
+          "lat": 9.9982,
+          "lng": 76.2913,
+          "depthCm": 7.53,
+          "population": 21000
+        },
+        {
+          "id": "edappally",
+          "name": "Edappally",
+          "lat": 10.0261,
+          "lng": 76.3084,
+          "depthCm": 7.48,
+          "population": 35000
+        },
+        {
+          "id": "palarivattom",
+          "name": "Palarivattom",
+          "lat": 10.0098,
+          "lng": 76.3065,
+          "depthCm": 7.51,
+          "population": 26000
+        },
+        {
+          "id": "vyttila",
+          "name": "Vyttila",
+          "lat": 9.9671,
+          "lng": 76.3183,
+          "depthCm": 7.5,
+          "population": 39000
+        },
+        {
+          "id": "kadavanthra",
+          "name": "Kadavanthra",
+          "lat": 9.9664,
+          "lng": 76.304,
+          "depthCm": 7.55,
+          "population": 23000
+        },
+        {
+          "id": "thevara",
+          "name": "Thevara",
+          "lat": 9.9522,
+          "lng": 76.2898,
+          "depthCm": 7.44,
+          "population": 18000
+        },
+        {
+          "id": "panampilly",
+          "name": "Panampilly Nagar",
+          "lat": 9.965,
+          "lng": 76.2951,
+          "depthCm": 7.37,
+          "population": 16000
+        },
+        {
+          "id": "marine_drive",
+          "name": "Marine Drive",
+          "lat": 9.9823,
+          "lng": 76.2776,
+          "depthCm": 7.45,
+          "population": 17000
+        },
+        {
+          "id": "mgroad",
+          "name": "MG Road",
+          "lat": 9.9816,
+          "lng": 76.285,
+          "depthCm": 7.53,
+          "population": 25000
+        },
+        {
+          "id": "perandoor",
+          "name": "Perandoor",
+          "lat": 10.0148,
+          "lng": 76.3088,
+          "depthCm": 7.44,
+          "population": 20000
+        },
+        {
+          "id": "fortkochi",
+          "name": "Fort Kochi",
+          "lat": 9.9654,
+          "lng": 76.2425,
+          "depthCm": 7.28,
+          "population": 14000
+        },
+        {
+          "id": "aluva",
+          "name": "Aluva",
+          "lat": 10.1069,
+          "lng": 76.3548,
+          "depthCm": 7.4,
+          "population": 32000
+        }
+      ]
+    },
+    {
+      "offsetMin": 30,
+      "weather": {
+        "rainfall_mm": 1.0,
+        "temperature_c": 24.4,
+        "humidity_percent": 96.0,
+        "river_discharge_m\u00b3_s": 2.0,
+        "water_level_m": 0.01,
+        "historical_floods": 4.0,
+        "infrastructure": 7.0,
+        "source": "open-meteo",
+        "hydrology_source": "scenario-proxy"
+      },
+      "zones": [
+        {
+          "id": "kaloor",
+          "name": "Kaloor",
+          "lat": 9.9982,
+          "lng": 76.2913,
+          "depthCm": 7.53,
+          "population": 21000
+        },
+        {
+          "id": "edappally",
+          "name": "Edappally",
+          "lat": 10.0261,
+          "lng": 76.3084,
+          "depthCm": 7.48,
+          "population": 35000
+        },
+        {
+          "id": "palarivattom",
+          "name": "Palarivattom",
+          "lat": 10.0098,
+          "lng": 76.3065,
+          "depthCm": 7.51,
+          "population": 26000
+        },
+        {
+          "id": "vyttila",
+          "name": "Vyttila",
+          "lat": 9.9671,
+          "lng": 76.3183,
+          "depthCm": 7.5,
+          "population": 39000
+        },
+        {
+          "id": "kadavanthra",
+          "name": "Kadavanthra",
+          "lat": 9.9664,
+          "lng": 76.304,
+          "depthCm": 7.55,
+          "population": 23000
+        },
+        {
+          "id": "thevara",
+          "name": "Thevara",
+          "lat": 9.9522,
+          "lng": 76.2898,
+          "depthCm": 7.44,
+          "population": 18000
+        },
+        {
+          "id": "panampilly",
+          "name": "Panampilly Nagar",
+          "lat": 9.965,
+          "lng": 76.2951,
+          "depthCm": 7.37,
+          "population": 16000
+        },
+        {
+          "id": "marine_drive",
+          "name": "Marine Drive",
+          "lat": 9.9823,
+          "lng": 76.2776,
+          "depthCm": 7.45,
+          "population": 17000
+        },
+        {
+          "id": "mgroad",
+          "name": "MG Road",
+          "lat": 9.9816,
+          "lng": 76.285,
+          "depthCm": 7.53,
+          "population": 25000
+        },
+        {
+          "id": "perandoor",
+          "name": "Perandoor",
+          "lat": 10.0148,
+          "lng": 76.3088,
+          "depthCm": 7.44,
+          "population": 20000
+        },
+        {
+          "id": "fortkochi",
+          "name": "Fort Kochi",
+          "lat": 9.9654,
+          "lng": 76.2425,
+          "depthCm": 7.28,
+          "population": 14000
+        },
+        {
+          "id": "aluva",
+          "name": "Aluva",
+          "lat": 10.1069,
+          "lng": 76.3548,
+          "depthCm": 7.4,
+          "population": 32000
+        }
+      ]
+    },
+    {
+      "offsetMin": 60,
+      "weather": {
+        "rainfall_mm": 0.2,
+        "temperature_c": 24.5,
+        "humidity_percent": 96.0,
+        "river_discharge_m\u00b3_s": 0.4,
+        "water_level_m": 0.002,
+        "historical_floods": 4.0,
+        "infrastructure": 7.0,
+        "source": "open-meteo",
+        "hydrology_source": "scenario-proxy"
+      },
+      "zones": [
+        {
+          "id": "kaloor",
+          "name": "Kaloor",
+          "lat": 9.9982,
+          "lng": 76.2913,
+          "depthCm": 7.52,
+          "population": 21000
+        },
+        {
+          "id": "edappally",
+          "name": "Edappally",
+          "lat": 10.0261,
+          "lng": 76.3084,
+          "depthCm": 7.48,
+          "population": 35000
+        },
+        {
+          "id": "palarivattom",
+          "name": "Palarivattom",
+          "lat": 10.0098,
+          "lng": 76.3065,
+          "depthCm": 7.5,
+          "population": 26000
+        },
+        {
+          "id": "vyttila",
+          "name": "Vyttila",
+          "lat": 9.9671,
+          "lng": 76.3183,
+          "depthCm": 7.5,
+          "population": 39000
+        },
+        {
+          "id": "kadavanthra",
+          "name": "Kadavanthra",
+          "lat": 9.9664,
+          "lng": 76.304,
+          "depthCm": 7.55,
+          "population": 23000
+        },
+        {
+          "id": "thevara",
+          "name": "Thevara",
+          "lat": 9.9522,
+          "lng": 76.2898,
+          "depthCm": 7.44,
+          "population": 18000
+        },
+        {
+          "id": "panampilly",
+          "name": "Panampilly Nagar",
+          "lat": 9.965,
+          "lng": 76.2951,
+          "depthCm": 7.37,
+          "population": 16000
+        },
+        {
+          "id": "marine_drive",
+          "name": "Marine Drive",
+          "lat": 9.9823,
+          "lng": 76.2776,
+          "depthCm": 7.44,
+          "population": 17000
+        },
+        {
+          "id": "mgroad",
+          "name": "MG Road",
+          "lat": 9.9816,
+          "lng": 76.285,
+          "depthCm": 7.52,
+          "population": 25000
+        },
+        {
+          "id": "perandoor",
+          "name": "Perandoor",
+          "lat": 10.0148,
+          "lng": 76.3088,
+          "depthCm": 7.44,
+          "population": 20000
+        },
+        {
+          "id": "fortkochi",
+          "name": "Fort Kochi",
+          "lat": 9.9654,
+          "lng": 76.2425,
+          "depthCm": 7.27,
+          "population": 14000
+        },
+        {
+          "id": "aluva",
+          "name": "Aluva",
+          "lat": 10.1069,
+          "lng": 76.3548,
+          "depthCm": 7.39,
+          "population": 32000
+        }
+      ]
+    },
+    {
+      "offsetMin": 90,
+      "weather": {
+        "rainfall_mm": 0.0,
+        "temperature_c": 24.8,
+        "humidity_percent": 95.0,
+        "river_discharge_m\u00b3_s": 0.0,
+        "water_level_m": 0.0,
+        "historical_floods": 4.0,
+        "infrastructure": 7.0,
+        "source": "open-meteo",
+        "hydrology_source": "scenario-proxy"
+      },
+      "zones": [
+        {
+          "id": "kaloor",
+          "name": "Kaloor",
+          "lat": 9.9982,
+          "lng": 76.2913,
+          "depthCm": 6.83,
+          "population": 21000
+        },
+        {
+          "id": "edappally",
+          "name": "Edappally",
+          "lat": 10.0261,
+          "lng": 76.3084,
+          "depthCm": 6.79,
+          "population": 35000
+        },
+        {
+          "id": "palarivattom",
+          "name": "Palarivattom",
+          "lat": 10.0098,
+          "lng": 76.3065,
+          "depthCm": 6.82,
+          "population": 26000
+        },
+        {
+          "id": "vyttila",
+          "name": "Vyttila",
+          "lat": 9.9671,
+          "lng": 76.3183,
+          "depthCm": 6.81,
+          "population": 39000
+        },
+        {
+          "id": "kadavanthra",
+          "name": "Kadavanthra",
+          "lat": 9.9664,
+          "lng": 76.304,
+          "depthCm": 6.86,
+          "population": 23000
+        },
+        {
+          "id": "thevara",
+          "name": "Thevara",
+          "lat": 9.9522,
+          "lng": 76.2898,
+          "depthCm": 6.75,
+          "population": 18000
+        },
+        {
+          "id": "panampilly",
+          "name": "Panampilly Nagar",
+          "lat": 9.965,
+          "lng": 76.2951,
+          "depthCm": 6.69,
+          "population": 16000
+        },
+        {
+          "id": "marine_drive",
+          "name": "Marine Drive",
+          "lat": 9.9823,
+          "lng": 76.2776,
+          "depthCm": 6.78,
+          "population": 17000
+        },
+        {
+          "id": "mgroad",
+          "name": "MG Road",
+          "lat": 9.9816,
+          "lng": 76.285,
+          "depthCm": 6.84,
+          "population": 25000
+        },
+        {
+          "id": "perandoor",
+          "name": "Perandoor",
+          "lat": 10.0148,
+          "lng": 76.3088,
+          "depthCm": 6.74,
+          "population": 20000
+        },
+        {
+          "id": "fortkochi",
+          "name": "Fort Kochi",
+          "lat": 9.9654,
+          "lng": 76.2425,
+          "depthCm": 6.64,
+          "population": 14000
+        },
+        {
+          "id": "aluva",
+          "name": "Aluva",
+          "lat": 10.1069,
+          "lng": 76.3548,
+          "depthCm": 6.71,
+          "population": 32000
+        }
+      ]
+    },
+    {
+      "offsetMin": 120,
+      "weather": {
+        "rainfall_mm": 0.0,
+        "temperature_c": 24.8,
+        "humidity_percent": 95.0,
+        "river_discharge_m\u00b3_s": 0.0,
+        "water_level_m": 0.0,
+        "historical_floods": 4.0,
+        "infrastructure": 7.0,
+        "source": "open-meteo",
+        "hydrology_source": "scenario-proxy"
+      },
+      "zones": [
+        {
+          "id": "kaloor",
+          "name": "Kaloor",
+          "lat": 9.9982,
+          "lng": 76.2913,
+          "depthCm": 6.83,
+          "population": 21000
+        },
+        {
+          "id": "edappally",
+          "name": "Edappally",
+          "lat": 10.0261,
+          "lng": 76.3084,
+          "depthCm": 6.79,
+          "population": 35000
+        },
+        {
+          "id": "palarivattom",
+          "name": "Palarivattom",
+          "lat": 10.0098,
+          "lng": 76.3065,
+          "depthCm": 6.82,
+          "population": 26000
+        },
+        {
+          "id": "vyttila",
+          "name": "Vyttila",
+          "lat": 9.9671,
+          "lng": 76.3183,
+          "depthCm": 6.81,
+          "population": 39000
+        },
+        {
+          "id": "kadavanthra",
+          "name": "Kadavanthra",
+          "lat": 9.9664,
+          "lng": 76.304,
+          "depthCm": 6.86,
+          "population": 23000
+        },
+        {
+          "id": "thevara",
+          "name": "Thevara",
+          "lat": 9.9522,
+          "lng": 76.2898,
+          "depthCm": 6.75,
+          "population": 18000
+        },
+        {
+          "id": "panampilly",
+          "name": "Panampilly Nagar",
+          "lat": 9.965,
+          "lng": 76.2951,
+          "depthCm": 6.69,
+          "population": 16000
+        },
+        {
+          "id": "marine_drive",
+          "name": "Marine Drive",
+          "lat": 9.9823,
+          "lng": 76.2776,
+          "depthCm": 6.78,
+          "population": 17000
+        },
+        {
+          "id": "mgroad",
+          "name": "MG Road",
+          "lat": 9.9816,
+          "lng": 76.285,
+          "depthCm": 6.84,
+          "population": 25000
+        },
+        {
+          "id": "perandoor",
+          "name": "Perandoor",
+          "lat": 10.0148,
+          "lng": 76.3088,
+          "depthCm": 6.74,
+          "population": 20000
+        },
+        {
+          "id": "fortkochi",
+          "name": "Fort Kochi",
+          "lat": 9.9654,
+          "lng": 76.2425,
+          "depthCm": 6.64,
+          "population": 14000
+        },
+        {
+          "id": "aluva",
+          "name": "Aluva",
+          "lat": 10.1069,
+          "lng": 76.3548,
+          "depthCm": 6.71,
+          "population": 32000
+        }
+      ]
+    }
+  ]
+}
